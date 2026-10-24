@@ -13,11 +13,20 @@ from ..schemas import LLMConfigIn, TestLLMResponse
 router = APIRouter(prefix="/api/llm-config", tags=["llm-config"])
 
 
+def _config_response(cfg: dict) -> dict:
+    """Normalize a stored config into the API shape (adds api_key_masked + configured)."""
+    has_key = bool(cfg.get("api_key"))
+    key = cfg.get("api_key", "")
+    return {
+        **cfg,
+        "api_key_masked": ("•••" + key[-4:]) if has_key and len(key) > 4 else ("set" if has_key else ""),
+        "configured": cfg.get("provider") != "none" and bool(cfg.get("model")),
+    }
+
+
 @router.get("")
 def get_config():
-    cfg = db.get_llm_config()
-    has_key = bool(cfg.get("api_key"))
-    return {**cfg, "api_key_masked": ("•••" + cfg["api_key"][-4:]) if has_key and len(cfg["api_key"]) > 4 else ("set" if has_key else ""), "configured": cfg.get("provider") != "none" and bool(cfg.get("model"))}
+    return _config_response(db.get_llm_config())
 
 
 @router.get("/providers")
@@ -34,7 +43,7 @@ def save_config(cfg: LLMConfigIn):
     cleaned["api_key"] = cleaned["api_key"].strip()
     if cleaned["provider"] != "none" and not cleaned["model"]:
         cleaned["provider"] = "none"
-    return db.save_llm_config(cleaned)
+    return _config_response(db.save_llm_config(cleaned))
 
 
 @router.post("/test", response_model=TestLLMResponse)
