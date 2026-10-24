@@ -15,13 +15,11 @@ generated for testing.
 - **🗺️ Map + detail UI** — Leaflet + OpenStreetMap, price-colored markers, HKU
   campus marker, restaurant popups; detail view with dummy photos (restaurant
   name burned in), generated menu poster, menu list and synthetic reviews.
-- **🧠 Memory** — every suggestion is recorded (and can be excluded from future
-  rounds); the user's own reviews are stored and shown in the detail view.
 - **⚙️ LLM configuration** — pick OpenAI, Anthropic Claude, Google Gemini,
   DeepSeek, Ollama/LM Studio (local), or **any custom OpenAI-compatible endpoint**
   (LM Studio, vLLM, OpenRouter, proxies…). Test connection + save from the UI.
   Without an LLM the app runs in **demo mode** with a built-in keyword parser.
-- **🔌 Data API** — REST endpoints expose restaurant data, filters, chat, memory
+- **🔌 Data API** — REST endpoints expose restaurant data, filters, chat
   and LLM config for the LLM/frontend to consume.
 
 ## Stack
@@ -49,7 +47,7 @@ AILT9019-Project-Prototype2/
 │   │   │   ├── providers.py  # OpenAI-compat / Anthropic / Gemini adapters
 │   │   │   ├── parse.py      # chat -> structured filters (LLM + keyword fallback)
 │   │   │   └── explain.py    # recommendation explanations (LLM + template)
-│   │   └── routers/          # restaurants, chat, llm-config, memory
+│   │   └── routers/          # restaurants, chat, llm-config
 │   ├── scripts/
 │   │   ├── init_db.py            # seed DB + generate images + JSON snapshot
 │   │   ├── generate_images.py    # (re)generate Pillow images only
@@ -62,8 +60,8 @@ AILT9019-Project-Prototype2/
     │   ├── api.js
     │   ├── styles.css
     │   └── components/       # Header, FilterChips, ChatBox, MapView,
-    │                         # RestaurantList, RestaurantDetail, MemoryPanel,
-    │                         # LLMConfigModal, RecommendationCard
+    │                         # RestaurantList, RestaurantDetail, LLMConfigModal,
+    │                         # RecommendationCard
     └── vite.config.js        # proxies /api + /images to :8010
 ```
 
@@ -141,15 +139,12 @@ LLM is configured, the built-in keyword parser + template explanations kick in
 |---|---|---|
 | GET | `/api/health` | liveness + restaurant count |
 | GET | `/api/meta` | meals, cuisines, dietary options, map centre |
-| GET | `/api/restaurants` | filtered list (meal/cuisine/price/dietary/open_at/q/exclude_previous) |
-| GET | `/api/restaurants/{id}` | full detail: menu, reviews, images, user review |
-| POST | `/api/chat` | `{message, filters?, exclude_previous?, limit?}` → picks + summary |
+| GET | `/api/restaurants` | filtered list (meal/cuisine/price/dietary/open_at/q) |
+| GET | `/api/restaurants/{id}` | full detail: menu, reviews, images |
+| POST | `/api/chat` | `{message, filters?, limit?}` → picks + summary |
 | GET/PUT | `/api/llm-config` | read / save LLM settings |
 | GET | `/api/llm-config/providers` | provider catalog with defaults |
 | POST | `/api/llm-config/test` | connectivity test with submitted settings |
-| GET | `/api/memory` | past suggestions + my reviews |
-| DELETE | `/api/memory/suggestions` | clear suggestion memory |
-| POST | `/api/reviews` | save my review (rating 1–5 + comment) |
 | GET | `/images/*` | generated dummy photos / menus |
 
 ## Synthetic data notes

@@ -33,23 +33,6 @@ CREATE TABLE IF NOT EXISTS restaurants (
     reviews         TEXT NOT NULL DEFAULT '[]'
 );
 
-CREATE TABLE IF NOT EXISTS suggestions (
-    id            INTEGER PRIMARY KEY AUTOINCREMENT,
-    query         TEXT NOT NULL,
-    filters       TEXT NOT NULL DEFAULT '{}',
-    restaurant_id TEXT NOT NULL,
-    reason        TEXT NOT NULL DEFAULT '',
-    created_at    TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS reviews (
-    id            INTEGER PRIMARY KEY AUTOINCREMENT,
-    restaurant_id TEXT NOT NULL,
-    rating        INTEGER NOT NULL,
-    comment       TEXT NOT NULL DEFAULT '',
-    created_at    TEXT NOT NULL
-);
-
 CREATE TABLE IF NOT EXISTS llm_config (
     id          INTEGER PRIMARY KEY CHECK (id = 1),
     provider    TEXT NOT NULL DEFAULT 'none',
@@ -165,81 +148,6 @@ def get_restaurant(restaurant_id: str) -> Optional[dict]:
             "SELECT * FROM restaurants WHERE id = ?", (restaurant_id,)
         ).fetchone()
     return row_to_restaurant(row) if row else None
-
-
-# ---------------- suggestions / reviews (memory) ----------------
-
-def add_suggestion(query: str, filters: dict, restaurant_id: str, reason: str) -> None:
-    with get_conn() as conn:
-        conn.execute(
-            "INSERT INTO suggestions (query, filters, restaurant_id, reason, created_at) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (query, json.dumps(filters, ensure_ascii=False), restaurant_id, reason, now_iso()),
-        )
-
-
-def list_suggestions(limit: int = 100) -> list[dict]:
-    with get_conn() as conn:
-        rows = conn.execute(
-            "SELECT s.*, r.name AS restaurant_name, r.hero_image, r.cuisine, r.price_level, "
-            "r.rating, r.walk_minutes, r.lat, r.lng "
-            "FROM suggestions s JOIN restaurants r ON r.id = s.restaurant_id "
-            "ORDER BY s.id DESC LIMIT ?",
-            (limit,),
-        ).fetchall()
-    return [dict(r) for r in rows]
-
-
-def suggested_restaurant_ids(limit: int = 50) -> set[str]:
-    with get_conn() as conn:
-        rows = conn.execute(
-            "SELECT DISTINCT restaurant_id FROM suggestions ORDER BY id DESC LIMIT ?",
-            (limit,),
-        ).fetchall()
-    return {r["restaurant_id"] for r in rows}
-
-
-def clear_suggestions() -> None:
-    with get_conn() as conn:
-        conn.execute("DELETE FROM suggestions")
-
-
-def add_review(restaurant_id: str, rating: int, comment: str) -> dict:
-    created = now_iso()
-    with get_conn() as conn:
-        cur = conn.execute(
-            "INSERT INTO reviews (restaurant_id, rating, comment, created_at) "
-            "VALUES (?, ?, ?, ?)",
-            (restaurant_id, rating, comment, created),
-        )
-        # refresh synthetic review_count aggregate (+1) so cards update
-        conn.execute(
-            "UPDATE restaurants SET review_count = review_count + 1 WHERE id = ?",
-            (restaurant_id,),
-        )
-        row = conn.execute(
-            "SELECT * FROM reviews WHERE id = ?", (cur.lastrowid,)
-        ).fetchone()
-    return dict(row)
-
-
-def list_reviews() -> list[dict]:
-    with get_conn() as conn:
-        rows = conn.execute(
-            "SELECT v.*, r.name AS restaurant_name, r.hero_image, r.cuisine "
-            "FROM reviews v JOIN restaurants r ON r.id = v.restaurant_id "
-            "ORDER BY v.id DESC"
-        ).fetchall()
-    return [dict(r) for r in rows]
-
-
-def get_user_review(restaurant_id: str) -> Optional[dict]:
-    with get_conn() as conn:
-        row = conn.execute(
-            "SELECT * FROM reviews WHERE restaurant_id = ? ORDER BY id DESC LIMIT 1",
-            (restaurant_id,),
-        ).fetchone()
-    return dict(row) if row else None
 
 
 # ---------------- llm config ----------------

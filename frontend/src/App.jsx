@@ -6,7 +6,6 @@ import ChatBox from './components/ChatBox'
 import MapView from './components/MapView'
 import RestaurantList from './components/RestaurantList'
 import RestaurantDetail from './components/RestaurantDetail'
-import MemoryPanel from './components/MemoryPanel'
 import LLMConfigModal from './components/LLMConfigModal'
 
 const EMPTY_FILTERS = {
@@ -15,7 +14,6 @@ const EMPTY_FILTERS = {
   cuisines: [],
   dietary: [],
   openAt: '',
-  excludePrevious: false,
 }
 
 export default function App() {
@@ -29,8 +27,6 @@ export default function App() {
   const [busy, setBusy] = useState(false)
   const [llmConfig, setLlmConfig] = useState(null)
   const [showConfig, setShowConfig] = useState(false)
-  const [showMemory, setShowMemory] = useState(false)
-  const [memory, setMemory] = useState({ suggestions: [], reviews: [] })
   const [error, setError] = useState('')
 
   const refreshMeta = useCallback(async () => {
@@ -50,19 +46,10 @@ export default function App() {
     }
   }, [])
 
-  const refreshMemory = useCallback(async () => {
-    try {
-      setMemory(await api.memory())
-    } catch {
-      /* non-fatal */
-    }
-  }, [])
-
   useEffect(() => {
     refreshMeta()
     refreshLLM()
-    refreshMemory()
-  }, [refreshMeta, refreshLLM, refreshMemory])
+  }, [refreshMeta, refreshLLM])
 
   const explore = useCallback(
     async (f) => {
@@ -75,7 +62,6 @@ export default function App() {
           price_level: f.priceLevel || undefined,
           dietary: f.dietary.length ? f.dietary : undefined,
           open_at: f.openAt || undefined,
-          exclude_previous: f.excludePrevious,
           limit: 20,
         })
         setItems(res.items)
@@ -108,7 +94,6 @@ export default function App() {
             open_at: filters.openAt || null,
             dietary: filters.dietary,
           },
-          exclude_previous: filters.excludePrevious,
           limit: 5,
         })
         setThread((t) => [
@@ -137,10 +122,6 @@ export default function App() {
     [filters],
   )
 
-  const onReviewAdded = useCallback(async () => {
-    await refreshMemory()
-  }, [refreshMemory])
-
   const detailId = selectedId
 
   if (error && !meta) {
@@ -160,11 +141,6 @@ export default function App() {
       <Header
         llmConfig={llmConfig}
         onOpenConfig={() => setShowConfig(true)}
-        onOpenMemory={() => {
-          refreshMemory()
-          setShowMemory(true)
-        }}
-        memoryCount={memory.suggestions.length + memory.reviews.length}
       />
 
       <div className="layout">
@@ -207,7 +183,6 @@ export default function App() {
         <RestaurantDetail
           id={detailId}
           onClose={() => setSelectedId(null)}
-          onReviewAdded={onReviewAdded}
         />
       )}
       {showConfig && (
@@ -218,13 +193,6 @@ export default function App() {
             setLlmConfig(cfg)
             setShowConfig(false)
           }}
-        />
-      )}
-      {showMemory && (
-        <MemoryPanel
-          memory={memory}
-          onClose={() => setShowMemory(false)}
-          onCleared={refreshMemory}
         />
       )}
     </div>

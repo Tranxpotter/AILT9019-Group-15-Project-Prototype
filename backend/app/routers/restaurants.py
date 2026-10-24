@@ -40,12 +40,10 @@ def list_restaurants(
     dietary: Optional[str] = Query(None),
     open_at: Optional[str] = Query(None),
     q: Optional[str] = Query(None),
-    exclude_previous: bool = Query(False),
     limit: int = Query(10, ge=1, le=50),
 ):
     p = _parse_from_query(meal, cuisine, price_level, dietary, open_at, q)
-    exclude = db.suggested_restaurant_ids(50) if exclude_previous else set()
-    scored = filter_and_score(db.list_restaurants(), p, exclude)
+    scored = filter_and_score(db.list_restaurants(), p)
     top = scored[:limit]
     out = []
     for s in top:
@@ -60,7 +58,6 @@ def restaurant_detail(restaurant_id: str):
     r = db.get_restaurant(restaurant_id)
     if not r:
         raise HTTPException(status_code=404, detail="Restaurant not found")
-    r["user_review"] = db.get_user_review(restaurant_id)
     r["images"] = {
         "hero": r["hero_image"],
         "interior": r["interior_image"],

@@ -29,7 +29,4 @@ export const api = {
   llmProviders: () => request('/api/llm-config/providers'),
   saveLLMConfig: (cfg) => request('/api/llm-config', { method: 'PUT', body: JSON.stringify(cfg) }),
   testLLM: (cfg) => request('/api/llm-config/test', { method: 'POST', body: JSON.stringify(cfg) }),
-  memory: () => request('/api/memory'),
-  clearMemory: () => request('/api/memory/suggestions', { method: 'DELETE' }),
-  addReview: (payload) => request('/api/reviews', { method: 'POST', body: JSON.stringify(payload) }),
 }

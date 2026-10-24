@@ -97,14 +97,6 @@ export default function FilterChips({ filters, onChange, meta, busy, onReset }) 
           value={filters.openAt}
           onChange={(e) => set({ openAt: e.target.value })}
         />
-        <label className="switch-label">
-          <input
-            type="checkbox"
-            checked={filters.excludePrevious}
-            onChange={(e) => set({ excludePrevious: e.target.checked })}
-          />
-          Skip places I was suggested before
-        </label>
       </div>
     </section>
   )

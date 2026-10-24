@@ -5,7 +5,7 @@ lives here so recommendations are reproducible and testable.
 """
 from __future__ import annotations
 
-from typing import Iterable, Optional
+from typing import Iterable
 
 from .schemas import ParseResult
 
@@ -44,17 +44,12 @@ def _text_haystack(restaurant: dict) -> str:
     return " ".join(parts).lower()
 
 
-def filter_and_score(
-    restaurants: Iterable[dict],
-    p: ParseResult,
-    exclude_ids: Optional[set[str]] = None,
-) -> list[dict]:
+def filter_and_score(restaurants: Iterable[dict], p: ParseResult) -> list[dict]:
     """Return restaurants sorted by score with a `matched` reason list."""
-    exclude_ids = exclude_ids or set()
     meal = (p.meal or "").strip().lower() or None
     price = p.price_level
     open_at = (p.open_at or "").strip()
-    time_min: Optional[int] = None
+    time_min: int | None = None
     if open_at:
         try:
             time_min = int(open_at[:2]) * 60 + int(open_at[3:5])
@@ -63,8 +58,6 @@ def filter_and_score(
 
     scored = []
     for r in restaurants:
-        if r["id"] in exclude_ids:
-            continue
         # hard constraints
         if meal and meal not in (r.get("meal_categories") or []):
             continue

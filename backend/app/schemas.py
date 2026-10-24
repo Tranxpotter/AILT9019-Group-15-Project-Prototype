@@ -19,7 +19,6 @@ class ParseResult(BaseModel):
 class ChatRequest(BaseModel):
     message: str
     filters: Optional[ParseResult] = None  # pre-existing UI filter selections merged in
-    exclude_previous: bool = True
     limit: int = 5
 
 
@@ -29,7 +28,6 @@ class ChatResponse(BaseModel):
     provider_label: str
     summary: str
     picks: list[dict]  # {restaurant, reason}
-    suggested_ids: list[str]
 
 
 class TestLLMResponse(BaseModel):
@@ -43,9 +41,3 @@ class LLMConfigIn(BaseModel):
     base_url: str = ""
     model: str = ""
     temperature: float = 0.3
-
-
-class ReviewIn(BaseModel):
-    restaurant_id: str
-    rating: int = Field(ge=1, le=5)
-    comment: str = ""

@@ -1,5 +1,5 @@
 """End-to-end LLM chat test: configure the backend with a *custom OpenAI-compatible*
-endpoint pointing at a local mock, then verify parse -> rank -> explain -> memory.
+endpoint pointing at a local mock, then verify parse -> rank -> explain.
 
 Run: backend/.venv/bin/python backend/scripts/test_chat_e2e.py   (requires backend on :8010)
 """
@@ -70,10 +70,6 @@ def put(path, payload):
 def main():
     threading.Thread(target=HTTPServer(MOCK, Handler).serve_forever, daemon=True).start()
 
-    # 0) clean slate: clear prior suggestion memory
-    req = urllib.request.Request(BASE + "/api/memory/suggestions", method="DELETE")
-    urllib.request.urlopen(req).read()
-
     # 1) save config pointing at the mock
     cfg = put(
         "/api/llm-config",
@@ -91,20 +87,14 @@ def main():
     assert "Halal" in res["summary"], res["summary"]
     pick = next(p for p in res["picks"] if p["id"] == "sun-kee-curry-house")
     assert "Halal kitchen" in pick["reason"], pick
-    print("OK  LLM chat: parsed filters, ranked, explained, memory recorded:", ids)
+    print("OK  LLM chat: parsed filters, ranked, explained:", ids)
 
-    # 3) memory now contains the suggestion
-    mem = json.loads(urllib.request.urlopen(BASE + "/api/memory").read())
-    names = [s["restaurant_name"] for s in mem["suggestions"]]
-    assert "Sun Kee Curry House" in names, names
-    print("OK  memory recorded:", names)
-
-    # 4) config GET reflects saved state
+    # 3) config GET reflects saved state
     got = json.loads(urllib.request.urlopen(BASE + "/api/llm-config").read())
     assert got["configured"] is True
     print("OK  llm-config persisted + configured =", got["configured"])
 
-    # 5) reset to demo mode
+    # 4) reset to demo mode
     put("/api/llm-config", {"provider": "none", "model": "", "base_url": "", "api_key": "", "temperature": 0.3})
     print("\nE2E LLM chat test passed ✔")
     return 0

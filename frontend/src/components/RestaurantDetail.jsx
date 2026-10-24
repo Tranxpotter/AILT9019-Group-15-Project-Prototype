@@ -1,31 +1,25 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api'
 
-function Stars({ value, onChange, size = 20 }) {
+function Stars({ value, size = 20 }) {
   return (
     <span className="stars">
       {[1, 2, 3, 4, 5].map((n) => (
-        <button
+        <span
           key={n}
-          type="button"
           className={`star ${n <= value ? 'on' : ''}`}
           style={{ fontSize: size }}
-          onClick={() => onChange && onChange(n)}
-          disabled={!onChange}
         >
           ★
-        </button>
+        </span>
       ))}
     </span>
   )
 }
 
-export default function RestaurantDetail({ id, onClose, onReviewAdded }) {
+export default function RestaurantDetail({ id, onClose }) {
   const [data, setData] = useState(null)
   const [tab, setTab] = useState('photos')
-  const [rating, setRating] = useState(0)
-  const [comment, setComment] = useState('')
-  const [saving, setSaving] = useState(false)
 
   useEffect(() => {
     let alive = true
@@ -37,23 +31,6 @@ export default function RestaurantDetail({ id, onClose, onReviewAdded }) {
       alive = false
     }
   }, [id])
-
-  const submitReview = async () => {
-    if (!rating) return
-    setSaving(true)
-    try {
-      await api.addReview({ restaurant_id: id, rating, comment })
-      setComment('')
-      setRating(0)
-      const d = await api.restaurant(id)
-      setData(d)
-      onReviewAdded?.()
-    } catch (e) {
-      alert(`Failed to save review: ${e.message}`)
-    } finally {
-      setSaving(false)
-    }
-  }
 
   if (!data) {
     return (
@@ -137,34 +114,7 @@ export default function RestaurantDetail({ id, onClose, onReviewAdded }) {
 
         {tab === 'reviews' && (
           <div className="reviews-tab">
-            {data.user_review && (
-              <div className="my-review">
-                <h4>Your review</h4>
-                <div className="review">
-                  <Stars value={data.user_review.rating} />
-                  <p>{data.user_review.comment || '—'}</p>
-                  <span className="dim">{data.user_review.created_at}</span>
-                </div>
-              </div>
-            )}
-            <h4>Write your review</h4>
-            <div className="review-form">
-              <Stars value={rating} onChange={setRating} size={26} />
-              <textarea
-                rows={2}
-                placeholder="How was it? (remembered for the next suggestion round)"
-                value={comment}
-                onChange={(e) => setComment(e.target.value)}
-              />
-              <button
-                className="btn primary"
-                onClick={submitReview}
-                disabled={!rating || saving}
-              >
-                {saving ? 'Saving…' : 'Save review'}
-              </button>
-            </div>
-            <h4>Recent visitor reviews (synthetic)</h4>
+            <h4>Visitor reviews (synthetic)</h4>
             {(data.reviews || []).map((r, i) => (
               <div key={i} className="review">
                 <strong>{r.user}</strong> <Stars value={r.rating} />

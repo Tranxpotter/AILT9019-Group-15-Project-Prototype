@@ -9,7 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from . import db
 from .config import DATA_DIR, IMAGES_DIR, RESTAURANTS_JSON
 from .images import ensure_images
-from .routers import chat, llm_config, memory, restaurants
+from .routers import chat, llm_config, restaurants
 from .seed_data import RESTAURANTS
 
 app = FastAPI(
@@ -29,7 +29,6 @@ app.add_middleware(
 app.include_router(restaurants.router)
 app.include_router(chat.router)
 app.include_router(llm_config.router)
-app.include_router(memory.router)
 
 app.mount("/images", StaticFiles(directory=str(IMAGES_DIR)), name="images")
 

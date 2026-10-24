@@ -1,4 +1,4 @@
-"""Chat endpoint: parse -> deterministic rank -> explain -> record memory."""
+"""Chat endpoint: parse -> deterministic rank -> explain."""
 from fastapi import APIRouter
 
 from .. import db
@@ -33,11 +33,10 @@ def chat(req: ChatRequest):
     parsed, mode = parse_message(config, req.message)
     merged = _merge(req.filters, parsed)
 
-    exclude = db.suggested_restaurant_ids(50) if req.exclude_previous else set()
     restaurants = db.list_restaurants()
 
     def search(pr):
-        return filter_and_score(restaurants, pr, exclude)[: req.limit]
+        return filter_and_score(restaurants, pr)[: req.limit]
 
     picks = search(merged)
     effective = merged
@@ -79,9 +78,6 @@ def chat(req: ChatRequest):
         c = card(s["restaurant"], reason)
         c["matched"] = s["reasons"]
         out_picks.append(c)
-        db.add_suggestion(
-            req.message, merged.model_dump(), s["restaurant"]["id"], reason
-        )
 
     return ChatResponse(
         structured=merged,
@@ -89,5 +85,4 @@ def chat(req: ChatRequest):
         provider_label=PROVIDER_INFO.get(config.get("provider", "none"), {}).get("label", config.get("provider", "")),
         summary=summary,
         picks=out_picks,
-        suggested_ids=[p["id"] for p in out_picks],
     )
