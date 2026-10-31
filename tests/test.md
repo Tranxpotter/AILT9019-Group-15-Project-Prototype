@@ -48,10 +48,10 @@
 
 ### 1d — Infeasible combination (must tell the user "none found")
 - **Type exactly:** `Cheap vegan breakfast`
-- **Expected behavior:** NO restaurant satisfies all three (no price-$ vegan breakfast place exists). The AI **must say it cannot find a suitable restaurant** (e.g. "I could not find a restaurant that fits all your constraints…").
-- **Expected UI:** a "not found" style message, **no** recommendation cards.
-- **Verify:** the summary contains a "could not find / no suitable restaurant" statement and the picks list is empty.
-- **⚠️ KNOWN LIMITATION (expected to FAIL today):** the pipeline silently relaxes the price filter and returns mid-range vegans (Café 88 / Green Bowl) **without saying it relaxed anything** in LLM mode. In Demo mode it does say "(I relaxed the price_level filter(s)…)" — this inconsistency is the limitation to report.
+- **Expected behavior:** NO restaurant satisfies all three (no price-$ vegan breakfast place exists). The AI **must say it cannot find a suitable restaurant** (e.g. "No suitable restaurant found. None of the restaurants around HKU match all of your constraints…").
+- **Expected UI:** a "not found" style message (`🚫 No suitable restaurant found` badge), **no** recommendation cards.
+- **Verify:** the summary contains a "no suitable restaurant" statement and the picks list is empty.
+- **Status after M1 fix:** the pipeline no longer relaxes filters silently. By default it returns `status: "no_match"` with empty picks and a deterministic refusal in **both** Demo and LLM modes. If relaxation is explicitly requested (`"relax": true`), the response lists the dropped fields and the summary discloses the trade-off in both modes.
 
 ---
 

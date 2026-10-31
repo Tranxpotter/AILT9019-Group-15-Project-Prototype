@@ -20,12 +20,25 @@ class ChatRequest(BaseModel):
     message: str
     filters: Optional[ParseResult] = None  # pre-existing UI filter selections merged in
     limit: int = 5
+    relax: bool = Field(
+        default=False,
+        description=(
+            "Opt-in: if no restaurant satisfies every hard filter, drop one filter at a time "
+            "and disclose which filters were relaxed. Defaults to false (strict)."
+        ),
+    )
 
 
 class ChatResponse(BaseModel):
     structured: ParseResult
+    effective: Optional[ParseResult] = Field(
+        default=None,
+        description="Filters actually applied when ranking (differs from structured only when relaxed).",
+    )
     mode: str  # "llm" | "demo"
     provider_label: str
+    status: str = Field(default="ok", description="ok | relaxed | no_match")
+    relaxed: list[str] = Field(default_factory=list)
     summary: str
     picks: list[dict]  # {restaurant, reason}
 

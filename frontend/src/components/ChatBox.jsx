@@ -8,6 +8,14 @@ const EXAMPLES = [
   'Something cheap and sweet open after 11pm',
 ]
 
+const RELAX_LABELS = {
+  price_level: 'price',
+  dietary: 'dietary',
+  cuisines: 'cuisine',
+  open_at: 'opening time',
+  meal: 'meal',
+}
+
 function StructuredBadge({ structured }) {
   if (!structured) return null
   const parts = []
@@ -66,6 +74,15 @@ export default function ChatBox({ thread, busy, onSend, mode, chatModeLabel, err
             </div>
           ) : (
             <div key={i} className="msg assistant">
+              {m.status === 'no_match' && (
+                <div className="no-match-badge">🚫 No suitable restaurant found</div>
+              )}
+              {m.relaxed?.length > 0 && (
+                <div className="relaxed-badge">
+                  ⚠️ Relaxed filter(s):{' '}
+                  {m.relaxed.map((f) => RELAX_LABELS[f] || f).join(', ')}
+                </div>
+              )}
               <p className={`summary ${m.mode === 'demo' ? 'demo' : ''}`}>{m.summary}</p>
               {m.mode && <StructuredBadge structured={m.structured} />}
               {m.picks?.length > 0 && (

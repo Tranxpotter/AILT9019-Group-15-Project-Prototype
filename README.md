@@ -133,6 +133,19 @@ stay reproducible; the LLM never queries the DB directly. If parsing fails or no
 LLM is configured, the built-in keyword parser + template explanations kick in
 (demo mode).
 
+### Honest empty results (no silent relaxation)
+
+Ranking is strict: a restaurant is returned only if it satisfies **every** hard
+filter (meal, price, dietary, opening time, avoided features). If nothing
+matches, `/api/chat` returns `status: "no_match"`, an empty `picks` list, and a
+deterministic summary beginning **"No suitable restaurant found."** The LLM is
+never asked to explain an empty result, so it cannot invent a recommendation.
+
+Relaxation is opt-in only: send `"relax": true` and the backend will drop one
+filter at a time. The response then sets `status: "relaxed"`, lists the dropped
+fields in `relaxed`, and both Demo and LLM summaries explicitly disclose the
+trade-off.
+
 ## API overview
 
 | Method | Path | Purpose |
@@ -141,7 +154,7 @@ LLM is configured, the built-in keyword parser + template explanations kick in
 | GET | `/api/meta` | meals, cuisines, dietary options, map centre |
 | GET | `/api/restaurants` | filtered list (meal/cuisine/price/dietary/open_at/q) |
 | GET | `/api/restaurants/{id}` | full detail: menu, reviews, images |
-| POST | `/api/chat` | `{message, filters?, limit?}` → picks + summary |
+| POST | `/api/chat` | `{message, filters?, limit?, relax?}` → picks + summary + `status`/`relaxed` |
 | GET/PUT | `/api/llm-config` | read / save LLM settings |
 | GET | `/api/llm-config/providers` | provider catalog with defaults |
 | POST | `/api/llm-config/test` | connectivity test with submitted settings |
@@ -161,6 +174,7 @@ LLM is configured, the built-in keyword parser + template explanations kick in
 ```bash
 cd backend
 .venv/bin/python scripts/test_llm_providers.py   # provider wire formats (mock servers)
+.venv/bin/python scripts/test_no_match.py        # strict refusal / disclosed relaxation (M1)
 # requires backend running on :8010:
 .venv/bin/python scripts/test_chat_e2e.py        # full LLM chat path (mock endpoint)
 ```

@@ -2,7 +2,12 @@
 from fastapi import APIRouter
 
 from .. import db
-from ..llm.explain import demo_summary, explain_llm
+from ..llm.explain import (
+    demo_summary,
+    explain_llm,
+    no_match_summary,
+    relaxation_disclosure,
+)
 from ..llm.parse import parse_message
 from ..llm.providers import PROVIDER_INFO
 from ..recommend import card, filter_and_score
@@ -38,11 +43,15 @@ def chat(req: ChatRequest):
     def search(pr):
         return filter_and_score(restaurants, pr)[: req.limit]
 
+    # Hard constraints are strict by default: never silently relax them.
     picks = search(merged)
     effective = merged
     relaxed: list[str] = []
-    if not picks:
-        # gentle relaxation: drop one constraint at a time until something fits
+    attempted: list[str] = []
+
+    if not picks and req.relax:
+        # Opt-in relaxation: drop one filter at a time. We record both what we
+        # tried and what actually changed so the response can disclose it.
         relaxed_candidates = [
             ("price_level", None),
             ("dietary", []),
@@ -52,6 +61,7 @@ def chat(req: ChatRequest):
         ]
         for field, empty in relaxed_candidates:
             if getattr(merged, field) not in (None, [], ""):
+                attempted.append(field)
                 relaxed_parse = merged.model_copy(deep=True)
                 setattr(relaxed_parse, field, empty)
                 picks = search(relaxed_parse)
@@ -60,17 +70,32 @@ def chat(req: ChatRequest):
                     relaxed.append(field)
                     break
 
-    # explain (LLM when available, template otherwise)
-    try:
-        if mode == "llm":
-            summary, picks_map = explain_llm(config, req.message, effective, picks)
-            if not summary:
+    if not picks:
+        # Deterministic refusal: never let the LLM explain an empty result.
+        status = "no_match"
+        summary = no_match_summary(merged, attempted)
+        picks_map: dict[str, str] = {}
+    else:
+        status = "relaxed" if relaxed else "ok"
+        try:
+            if mode == "llm":
+                summary, picks_map = explain_llm(
+                    config, req.message, effective, picks, relaxed
+                )
+                if not summary:
+                    summary, picks_map = demo_summary(
+                        req.message, effective, picks, relaxed
+                    )
+            else:
                 summary, picks_map = demo_summary(req.message, effective, picks, relaxed)
-                mode = "llm"
-        else:
+        except Exception:
             summary, picks_map = demo_summary(req.message, effective, picks, relaxed)
-    except Exception:
-        summary, picks_map = demo_summary(req.message, effective, picks, relaxed)
+
+        if relaxed:
+            # Guarantee disclosure even if the LLM ignored the instruction.
+            disclosure = relaxation_disclosure(relaxed)
+            if disclosure.lower() not in summary.lower():
+                summary = f"{summary.rstrip()} {disclosure}"
 
     out_picks = []
     for s in picks:
@@ -81,8 +106,11 @@ def chat(req: ChatRequest):
 
     return ChatResponse(
         structured=merged,
+        effective=effective,
         mode=mode,
         provider_label=PROVIDER_INFO.get(config.get("provider", "none"), {}).get("label", config.get("provider", "")),
+        status=status,
+        relaxed=relaxed,
         summary=summary,
         picks=out_picks,
     )

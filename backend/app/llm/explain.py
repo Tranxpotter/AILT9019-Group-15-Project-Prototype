@@ -1,5 +1,10 @@
 """Generate the explanation layer: LLM-written when configured, otherwise
-deterministic templates (demo mode)."""
+deterministic templates (demo mode).
+
+Empty results are never delegated to the LLM: `no_match_summary()` produces a
+deterministic refusal so an infeasible request can never be presented as if it
+had been satisfied. Relaxation, when explicitly opted into, is always disclosed.
+"""
 from __future__ import annotations
 
 from ..schemas import ParseResult
@@ -21,11 +26,83 @@ EXPLAIN_SCHEMA = {
     "required": ["summary", "picks"],
 }
 
+# Internal filter field -> human label used in disclosures/refusals.
+_FIELD_LABELS = {
+    "price_level": "price",
+    "dietary": "dietary",
+    "cuisines": "cuisine",
+    "open_at": "opening time",
+    "meal": "meal",
+}
 
-def explain_llm(config: dict, message: str, p: ParseResult, picks: list[dict]) -> tuple[str, dict[str, str]]:
+
+def constraint_labels(p: ParseResult) -> list[str]:
+    """Human-readable list of the hard filters a request applied."""
+    labels: list[str] = []
+    if p.meal:
+        labels.append(f"meal={p.meal}")
+    if p.price_level:
+        labels.append(f"price={'$' * p.price_level}")
+    if p.cuisines:
+        labels.append("cuisine=" + "/".join(p.cuisines))
+    if p.open_at:
+        labels.append(f"open at {p.open_at}")
+    if p.dietary:
+        labels.append("dietary=" + "+".join(p.dietary))
+    if p.avoid:
+        labels.append("avoid=" + "/".join(p.avoid))
+    return labels
+
+
+def relaxation_disclosure(relaxed: list[str]) -> str:
+    """Explicit disclosure appended whenever filters were relaxed."""
+    labels = [_FIELD_LABELS.get(f, f) for f in relaxed]
+    return (
+        f"Note: no restaurant matched all filters, so I relaxed the "
+        f"{' & '.join(labels)} filter(s) — these picks may not meet that constraint."
+    )
+
+
+def no_match_summary(p: ParseResult, attempted: list[str] | None = None) -> str:
+    """Deterministic refusal used whenever ranking returns no picks.
+
+    This is deliberately not delegated to the LLM: an empty result must always
+    produce an explicit, non-hallucinated refusal.
+    """
+    attempted = attempted or []
+    labels = constraint_labels(p)
+    if labels:
+        text = (
+            "No suitable restaurant found. None of the restaurants around HKU match all of "
+            f"your constraints ({', '.join(labels)})."
+        )
+    else:
+        text = (
+            "No suitable restaurant found. I could not match your request to any restaurant "
+            "around HKU."
+        )
+    if attempted:
+        tried = " & ".join(_FIELD_LABELS.get(f, f) for f in attempted)
+        text += f" I tried relaxing the {tried} filter(s) one at a time, but still found no match."
+    else:
+        text += " I did not relax any filters automatically."
+    text += (
+        " Try relaxing one of the constraints yourself — for example raise the price level, "
+        "drop a dietary requirement, or choose a different meal — and ask again."
+    )
+    return text
+
+
+def explain_llm(
+    config: dict,
+    message: str,
+    p: ParseResult,
+    picks: list[dict],
+    relaxed: list[str] | None = None,
+) -> tuple[str, dict[str, str]]:
     provider = get_provider(config)
     if provider is None:
-        return demo_summary(message, p, picks)
+        return demo_summary(message, p, picks, relaxed)
 
     lines = []
     for pick in picks:
@@ -37,6 +114,12 @@ def explain_llm(config: dict, message: str, p: ParseResult, picks: list[dict]) -
         )
     lines.append("")
     lines.append("Matched filters: " + p.model_dump_json())
+    if relaxed:
+        relaxed_labels = ", ".join(_FIELD_LABELS.get(f, f) for f in relaxed)
+        lines.append(
+            "IMPORTANT: these results required relaxing the following filter(s): "
+            f"{relaxed_labels}. State this trade-off explicitly in the summary."
+        )
     user = (
         "You are a food recommender for HKU students. For each restaurant below, explain in ONE "
         "sentence why it suits the user's request referenced from the matched filters, being honest "
@@ -53,13 +136,15 @@ def explain_llm(config: dict, message: str, p: ParseResult, picks: list[dict]) -
     return str(data.get("summary", "")), {k: str(v) for k, v in (data.get("picks") or {}).items()}
 
 
-def demo_summary(message: str, p: ParseResult, picks: list[dict], relaxed: list[str] | None = None) -> tuple[str, dict[str, str]]:
+def demo_summary(
+    message: str,
+    p: ParseResult,
+    picks: list[dict],
+    relaxed: list[str] | None = None,
+) -> tuple[str, dict[str, str]]:
     relaxed = relaxed or []
     if not picks:
-        return (
-            "I could not find a restaurant that fits all your constraints. "
-            "Try relaxing the price, meal or time filters."
-        ), {}
+        return no_match_summary(p), {}
     labels = []
     if p.meal:
         labels.append(p.meal)
@@ -79,6 +164,6 @@ def demo_summary(message: str, p: ParseResult, picks: list[dict], relaxed: list[
         f"{top['walk_minutes']} min walk, {top['rating']}/5). "
     )
     if relaxed:
-        summary += f"(I relaxed the {' & '.join(relaxed)} filter(s) to find these.) "
+        summary += relaxation_disclosure(relaxed) + " "
     picks_map = {pick["restaurant"]["id"]: "; ".join(pick["reasons"]) for pick in picks}
     return summary, picks_map

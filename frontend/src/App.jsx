@@ -105,6 +105,8 @@ export default function App() {
             mode: res.mode,
             structured: res.structured,
             provider_label: res.provider_label,
+            status: res.status,
+            relaxed: res.relaxed || [],
           },
         ])
         setMode('chat')

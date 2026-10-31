@@ -110,6 +110,16 @@ input[type='time'] {
   font-size: 11px; color: var(--accent); background: rgba(255, 176, 58, 0.08);
   border: 1px dashed rgba(255, 176, 58, 0.35); border-radius: 8px; padding: 4px 8px; margin-bottom: 6px;
 }
+.no-match-badge {
+  display: inline-block; font-size: 11px; font-weight: 700; color: var(--bad);
+  background: rgba(248, 113, 113, 0.12); border: 1px solid rgba(248, 113, 113, 0.4);
+  border-radius: 999px; padding: 4px 10px; margin: 0 6px 6px 0;
+}
+.relaxed-badge {
+  display: inline-block; font-size: 11px; color: var(--accent);
+  background: rgba(255, 176, 58, 0.1); border: 1px solid rgba(255, 176, 58, 0.35);
+  border-radius: 999px; padding: 4px 10px; margin: 0 6px 6px 0;
+}
 
 .picks { display: flex; flex-direction: column; gap: 8px; }
 .rec-card {
