@@ -1,4 +1,4 @@
-export default function RestaurantList({ items, selectedId, onSelect, mode, busy }) {
+export default function RestaurantList({ items, selectedId, onSelect, mode, busy, notice }) {
   return (
     <section className="list card">
       <div className="card-head">
@@ -7,6 +7,7 @@ export default function RestaurantList({ items, selectedId, onSelect, mode, busy
           <span className="hint">({items.length})</span>
         </h2>
       </div>
+      {notice && <div className="list-notice">⚠️ {notice}</div>}
       {busy && <div className="list-busy">Loading…</div>}
       {!busy && items.length === 0 && (
         <div className="list-empty">No matches — try relaxing a filter or describing differently.</div>
@@ -30,6 +31,11 @@ export default function RestaurantList({ items, selectedId, onSelect, mode, busy
                 <span className="dim">· {item.walk_minutes} min</span>
               </div>
               {item.reason && <p className="rec-reason">{item.reason}</p>}
+              {item.soft_mismatches?.length > 0 && (
+                <p className="soft-note">
+                  ⚠️ Partial match: {item.soft_mismatches.join('; ')}
+                </p>
+              )}
             </div>
             <span className="li-index">{i + 1}</span>
           </button>

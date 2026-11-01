@@ -356,3 +356,23 @@ RESTAURANTS = [
         ],
     },
 ]
+
+# Conservative allergen flags for the synthetic dataset. These are derived from
+# menu/description text and are intentionally conservative: if an ingredient
+# synonym appears anywhere in a venue's text, the allergen is flagged.
+ALLERGENS = {
+    "water-street-noodle-house": ["fish", "crustacean", "gluten", "soy"],
+    "cafe-88": ["gluten", "dairy", "egg", "sesame"],
+    "sun-kee-curry-house": ["gluten", "dairy", "tree-nut"],
+    "pokfulam-thai-grill": ["fish", "crustacean", "peanut", "dairy"],
+    "dim-sum-dynasty": ["crustacean", "gluten", "egg", "soy"],
+    "green-bowl-salad-bar": ["sesame", "soy"],
+    "kennedy-town-grill-house": ["gluten", "dairy", "egg"],
+    "jade-garden-vegetarian": ["soy", "gluten", "mollusk"],
+    "hana-sushi": ["fish", "crustacean", "mollusk", "gluten", "soy", "egg"],
+    "sweet-corner-desserts": ["sesame"],
+}
+
+for _restaurant in RESTAURANTS:
+    _restaurant["allergens"] = ALLERGENS.get(_restaurant["id"], [])
+

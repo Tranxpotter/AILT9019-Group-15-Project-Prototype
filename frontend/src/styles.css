@@ -120,6 +120,11 @@ input[type='time'] {
   background: rgba(255, 176, 58, 0.1); border: 1px solid rgba(255, 176, 58, 0.35);
   border-radius: 999px; padding: 4px 10px; margin: 0 6px 6px 0;
 }
+.soft-fallback-badge {
+  display: inline-block; font-size: 11px; color: var(--accent);
+  background: rgba(255, 176, 58, 0.1); border: 1px dashed rgba(255, 176, 58, 0.5);
+  border-radius: 999px; padding: 4px 10px; margin: 0 6px 6px 0;
+}
 
 .picks { display: flex; flex-direction: column; gap: 8px; }
 .rec-card {
@@ -140,6 +145,8 @@ input[type='time'] {
 .rating { color: var(--accent); font-weight: 700; }
 .dim { color: var(--dim); }
 .rec-reason { margin: 4px 0 0; font-size: 12px; color: var(--text); opacity: 0.85; }
+.allergen-note { margin: 4px 0 0; font-size: 11px; color: var(--bad); opacity: 0.9; }
+.soft-note { margin: 4px 0 0; font-size: 11px; color: var(--accent); opacity: 0.9; }
 
 .chat-input { display: flex; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--line); }
 .chat-input textarea {
@@ -163,6 +170,11 @@ input[type='time'] {
 .li-body { flex: 1; min-width: 0; }
 .li-index { color: var(--dim); font-size: 11px; }
 .list-empty, .list-busy { padding: 18px; color: var(--dim); text-align: center; }
+.list-notice {
+  margin: 4px 14px 8px; padding: 8px 10px; font-size: 12px;
+  color: var(--accent); background: rgba(255, 176, 58, 0.08);
+  border: 1px dashed rgba(255, 176, 58, 0.35); border-radius: 8px;
+}
 .pad { padding: 10px 14px; }
 
 /* ---------- leaflet markers ---------- */

@@ -7,6 +7,7 @@ had been satisfied. Relaxation, when explicitly opted into, is always disclosed.
 """
 from __future__ import annotations
 
+from ..allergens import ALLERGEN_SHORT_LABELS
 from ..schemas import ParseResult
 from .providers import get_provider
 
@@ -30,6 +31,7 @@ EXPLAIN_SCHEMA = {
 _FIELD_LABELS = {
     "price_level": "price",
     "dietary": "dietary",
+    "allergens": "allergens",
     "cuisines": "cuisine",
     "open_at": "opening time",
     "meal": "meal",
@@ -49,9 +51,17 @@ def constraint_labels(p: ParseResult) -> list[str]:
         labels.append(f"open at {p.open_at}")
     if p.dietary:
         labels.append("dietary=" + "+".join(p.dietary))
+    if p.allergens:
+        labels.append("allergens=" + "+".join(p.allergens))
     if p.avoid:
         labels.append("avoid=" + "/".join(p.avoid))
     return labels
+
+
+def allergen_disclosure(allergens: list[str]) -> str:
+    """Explicit safety disclosure appended whenever allergens were enforced."""
+    labels = [ALLERGEN_SHORT_LABELS.get(a, a) for a in allergens]
+    return f"For safety, I excluded restaurants containing {', '.join(labels)}."
 
 
 def relaxation_disclosure(relaxed: list[str]) -> str:
@@ -60,6 +70,20 @@ def relaxation_disclosure(relaxed: list[str]) -> str:
     return (
         f"Note: no restaurant matched all filters, so I relaxed the "
         f"{' & '.join(labels)} filter(s) — these picks may not meet that constraint."
+    )
+
+
+def soft_fallback_disclosure(unmet_soft: list[str] | None = None) -> str:
+    """Explicit disclosure when no restaurant matched all soft preferences."""
+    labels = [_FIELD_LABELS.get(f, f) for f in (unmet_soft or [])]
+    if labels:
+        return (
+            f"No restaurant matches all your preferences ({', '.join(labels)}); "
+            "I'm showing the closest options that satisfy your hard constraints."
+        )
+    return (
+        "No restaurant matches all your preferences; I'm showing the closest "
+        "options that satisfy your hard constraints."
     )
 
 
@@ -99,10 +123,19 @@ def explain_llm(
     p: ParseResult,
     picks: list[dict],
     relaxed: list[str] | None = None,
+    soft_fallback: bool = False,
+    unmet_soft: list[str] | None = None,
 ) -> tuple[str, dict[str, str]]:
     provider = get_provider(config)
     if provider is None:
-        return demo_summary(message, p, picks, relaxed)
+        return demo_summary(
+            message,
+            p,
+            picks,
+            relaxed,
+            soft_fallback=soft_fallback,
+            unmet_soft=unmet_soft,
+        )
 
     lines = []
     for pick in picks:
@@ -114,11 +147,28 @@ def explain_llm(
         )
     lines.append("")
     lines.append("Matched filters: " + p.model_dump_json())
+    if p.allergens:
+        allergen_labels = ", ".join(
+            ALLERGEN_SHORT_LABELS.get(a, a) for a in p.allergens
+        )
+        lines.append(
+            "SAFETY: the user has these allergens: "
+            f"{allergen_labels}. The backend already excluded venues containing them; "
+            "do not claim any restaurant is allergen-free unless it is in the provided list."
+        )
     if relaxed:
         relaxed_labels = ", ".join(_FIELD_LABELS.get(f, f) for f in relaxed)
         lines.append(
             "IMPORTANT: these results required relaxing the following filter(s): "
             f"{relaxed_labels}. State this trade-off explicitly in the summary."
+        )
+    if soft_fallback:
+        soft_labels = ", ".join(_FIELD_LABELS.get(f, f) for f in (unmet_soft or []))
+        lines.append(
+            "IMPORTANT: no restaurant matches all of the user's soft preferences "
+            f"({soft_labels}). The backend is showing the closest matches that satisfy "
+            "the hard constraints. State this explicitly in the summary and be honest "
+            "about which preference is not met."
         )
     user = (
         "You are a food recommender for HKU students. For each restaurant below, explain in ONE "
@@ -141,6 +191,8 @@ def demo_summary(
     p: ParseResult,
     picks: list[dict],
     relaxed: list[str] | None = None,
+    soft_fallback: bool = False,
+    unmet_soft: list[str] | None = None,
 ) -> tuple[str, dict[str, str]]:
     relaxed = relaxed or []
     if not picks:
@@ -150,12 +202,16 @@ def demo_summary(
         labels.append(p.meal)
     if p.price_level:
         labels.append({1: "budget", 2: "mid-range", 3: "upscale"}[p.price_level])
-    if p.cuisines:
+    if not soft_fallback and p.cuisines:
         labels.append("/".join(p.cuisines))
     if p.open_at:
         labels.append(f"open at {p.open_at}")
-    if p.dietary:
+    if not soft_fallback and p.dietary:
         labels.append("+".join(p.dietary))
+    if p.allergens:
+        labels.append(
+            "no " + "/".join(ALLERGEN_SHORT_LABELS.get(a, a) for a in p.allergens)
+        )
     qualifier = " · ".join(labels) if labels else "your request"
     top = picks[0]["restaurant"]
     summary = (
@@ -165,5 +221,7 @@ def demo_summary(
     )
     if relaxed:
         summary += relaxation_disclosure(relaxed) + " "
+    if soft_fallback:
+        summary += soft_fallback_disclosure(unmet_soft) + " "
     picks_map = {pick["restaurant"]["id"]: "; ".join(pick["reasons"]) for pick in picks}
     return summary, picks_map

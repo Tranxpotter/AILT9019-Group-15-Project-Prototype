@@ -11,6 +11,13 @@ class ParseResult(BaseModel):
     price_level: Optional[int] = Field(default=None, description="1 ($), 2 ($$), 3 ($$$), or null")
     open_at: Optional[str] = Field(default=None, description="'HH:MM' the user plans to eat, or null")
     dietary: list[str] = Field(default_factory=list)
+    allergens: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Safety-critical allergen groups to exclude (fish, crustacean, mollusk, "
+            "peanut, tree-nut, gluten, dairy, egg, soy, sesame)."
+        ),
+    )
     keywords: list[str] = Field(default_factory=list)
     avoid: list[str] = Field(default_factory=list)
     notes: str = Field(default="", description="extra context the model detected")
@@ -37,7 +44,20 @@ class ChatResponse(BaseModel):
     )
     mode: str  # "llm" | "demo"
     provider_label: str
-    status: str = Field(default="ok", description="ok | relaxed | no_match")
+    status: str = Field(
+        default="ok", description="ok | relaxed | soft_fallback | no_match"
+    )
+    soft_fallback: bool = Field(
+        default=False,
+        description=(
+            "True when no restaurant matched all soft preferences and the response "
+            "fell back to hard-constraint matches."
+        ),
+    )
+    unmet_soft: list[str] = Field(
+        default_factory=list,
+        description="Soft preference fields that no restaurant matched (dietary, cuisines).",
+    )
     relaxed: list[str] = Field(default_factory=list)
     summary: str
     picks: list[dict]  # {restaurant, reason}

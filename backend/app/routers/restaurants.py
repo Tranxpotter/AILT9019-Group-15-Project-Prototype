@@ -4,7 +4,13 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Query
 
 from .. import db
-from ..recommend import PRICE_SYMBOL, card, filter_and_score
+from ..allergens import (
+    ALLERGEN_FILTER_LABELS,
+    ALLERGEN_FILTER_OPTIONS,
+    ALLERGEN_GROUPS,
+    normalize_allergens,
+)
+from ..recommend import PRICE_SYMBOL, card, filter_and_score, split_soft_matches
 from ..schemas import ParseResult
 
 router = APIRouter(prefix="/api", tags=["restaurants"])
@@ -17,6 +23,7 @@ def _parse_from_query(
     cuisine: Optional[str],
     price_level: Optional[int],
     dietary: Optional[str],
+    allergens: Optional[str],
     open_at: Optional[str],
     q: Optional[str],
 ) -> ParseResult:
@@ -26,6 +33,9 @@ def _parse_from_query(
         price_level=price_level,
         open_at=open_at or None,
         dietary=[d for d in (dietary or "").split(",") if d],
+        allergens=normalize_allergens(
+            [a for a in (allergens or "").split(",") if a]
+        ),
         keywords=[q] if q else [],
         avoid=[],
         notes="",
@@ -38,19 +48,27 @@ def list_restaurants(
     cuisine: Optional[str] = Query(None),
     price_level: Optional[int] = Query(None, ge=1, le=3),
     dietary: Optional[str] = Query(None),
+    allergens: Optional[str] = Query(None),
     open_at: Optional[str] = Query(None),
     q: Optional[str] = Query(None),
     limit: int = Query(10, ge=1, le=50),
 ):
-    p = _parse_from_query(meal, cuisine, price_level, dietary, open_at, q)
+    p = _parse_from_query(meal, cuisine, price_level, dietary, allergens, open_at, q)
     scored = filter_and_score(db.list_restaurants(), p)
-    top = scored[:limit]
+    selected, soft_meta = split_soft_matches(scored, p)
+    top = selected[:limit]
     out = []
     for s in top:
         c = card(s["restaurant"], "; ".join(s["reasons"]))
         c["matched"] = s["reasons"]
+        c["soft_mismatches"] = s.get("soft_mismatches", [])
         out.append(c)
-    return {"count": len(out), "items": out}
+    return {
+        "count": len(out),
+        "items": out,
+        "soft_fallback": soft_meta["soft_fallback"],
+        "unmet_soft": soft_meta["unmet_soft"],
+    }
 
 
 @router.get("/restaurants/{restaurant_id}")
@@ -84,6 +102,17 @@ def meta():
         "dietary_options": [
             "vegetarian", "vegan", "halal", "no-pork", "gluten-free", "nut-free",
         ],
+        "dietary_labels": {
+            "vegetarian": "Vegetarian",
+            "vegan": "Vegan",
+            "halal": "Halal",
+            "no-pork": "No pork",
+            "gluten-free": "Gluten-free kitchen",
+            "nut-free": "Nut-free kitchen",
+        },
+        "allergen_options": ALLERGEN_FILTER_OPTIONS,
+        "allergen_option_labels": ALLERGEN_FILTER_LABELS,
+        "allergen_groups": ALLERGEN_GROUPS,
         "price_levels": [{"level": 1, "symbol": "$"}, {"level": 2, "symbol": "$$"}, {"level": 3, "symbol": "$$$"}],
         "restaurants_count": len(restaurants),
     }

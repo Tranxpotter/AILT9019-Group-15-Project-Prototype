@@ -76,7 +76,9 @@ export default function FilterChips({ filters, onChange, meta, busy, onReset }) 
       </div>
 
       <div className="filter-row">
-        <label>Dietary</label>
+        <label>
+          Dietary <span className="hint">(venue labels)</span>
+        </label>
         <div className="chips wrap">
           {(meta?.dietary_options || []).map((d) => (
             <button
@@ -84,7 +86,24 @@ export default function FilterChips({ filters, onChange, meta, busy, onReset }) 
               className={`chip ${filters.dietary.includes(d) ? 'on' : ''}`}
               onClick={() => toggle('dietary', d)}
             >
-              {d}
+              {meta?.dietary_labels?.[d] || d}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="filter-row">
+        <label>
+          Allergens <span className="hint">(safety exclusion)</span>
+        </label>
+        <div className="chips wrap">
+          {(meta?.allergen_options || []).map((a) => (
+            <button
+              key={a}
+              className={`chip ${filters.allergens?.includes(a) ? 'on' : ''}`}
+              onClick={() => toggle('allergens', a)}
+            >
+              {meta?.allergen_option_labels?.[a] || a}
             </button>
           ))}
         </div>

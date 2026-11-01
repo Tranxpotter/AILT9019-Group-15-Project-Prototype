@@ -15,6 +15,11 @@ export default function RecommendationCard({ item, index }) {
           <span className="dim">· ~{item.avg_cost} HKD</span>
         </div>
         {item.reason && <p className="rec-reason">💡 {item.reason}</p>}
+        {item.soft_mismatches?.length > 0 && (
+          <p className="soft-note">
+            ⚠️ Partial match: {item.soft_mismatches.join('; ')}
+          </p>
+        )}
         {item.tags?.length > 0 && (
           <div className="chips wrap tiny">
             {item.tags.slice(0, 3).map((t) => (

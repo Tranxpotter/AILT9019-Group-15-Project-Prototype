@@ -36,8 +36,9 @@ app.mount("/images", StaticFiles(directory=str(IMAGES_DIR)), name="images")
 @app.on_event("startup")
 def startup() -> None:
     db.init_db()
-    if not db.list_restaurants():
-        db.upsert_restaurants(RESTAURANTS)
+    # Always upsert the synthetic seed data so new fields (e.g. allergens) are
+    # populated for databases created by older versions.
+    db.upsert_restaurants(RESTAURANTS)
     ensure_images()
     # keep a human-readable JSON snapshot in sync with the DB
     try:

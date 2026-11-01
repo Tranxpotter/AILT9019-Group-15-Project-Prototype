@@ -1,6 +1,19 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api'
 
+const ALLERGEN_LABELS = {
+  fish: 'fish',
+  crustacean: 'crustaceans',
+  mollusk: 'mollusks',
+  peanut: 'peanuts',
+  'tree-nut': 'tree nuts',
+  gluten: 'gluten',
+  dairy: 'dairy',
+  egg: 'egg',
+  soy: 'soy',
+  sesame: 'sesame',
+}
+
 function Stars({ value, size = 20 }) {
   return (
     <span className="stars">
@@ -59,6 +72,12 @@ export default function RestaurantDetail({ id, onClose }) {
               📍 {data.address} · 🚶 {data.walk_minutes} min walk from HKU · 🕐 {hours}
             </p>
             <p className="desc">{data.description}</p>
+            {data.allergens?.length > 0 && (
+              <p className="allergen-note">
+                ⚠️ Contains:{' '}
+                {data.allergens.map((a) => ALLERGEN_LABELS[a] || a).join(', ')}
+              </p>
+            )}
             <div className="chips wrap tiny">
               {data.tags?.map((t) => (
                 <span key={t} className="chip static">

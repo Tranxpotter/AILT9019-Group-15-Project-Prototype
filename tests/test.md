@@ -43,8 +43,8 @@
 ### 1c — Time constraint
 - **Type exactly:** `Dinner at 22:30, anywhere`
 - **Expected `parsed →` badge:** `open at 22:30` (and `meal: dinner`).
-- **Expected cards (open at 22:30):** Sun Kee Curry House (closes 22:30), Pokfulam Thai & Grill (23:00), Kennedy Town Grill House (23:30), Sweet Corner Desserts (01:00).
-- **Verify:** **Hana Sushi must NOT appear** (closes 22:00). Cross-check each shown card's hours against 22:30.
+- **Expected cards (open at 22:30, full-meal venues only):** Sun Kee Curry House (closes 22:30), Pokfulam Thai & Grill (23:00), Kennedy Town Grill House (23:30).
+- **Verify:** **Hana Sushi must NOT appear** (closes 22:00). **Sweet Corner Desserts must NOT appear** — dessert/snack venues are excluded for full meals. Cross-check each shown card's hours against 22:30.
 
 ### 1d — Infeasible combination (must tell the user "none found")
 - **Type exactly:** `Cheap vegan breakfast`
@@ -52,6 +52,23 @@
 - **Expected UI:** a "not found" style message (`🚫 No suitable restaurant found` badge), **no** recommendation cards.
 - **Verify:** the summary contains a "no suitable restaurant" statement and the picks list is empty.
 - **Status after M1 fix:** the pipeline no longer relaxes filters silently. By default it returns `status: "no_match"` with empty picks and a deterministic refusal in **both** Demo and LLM modes. If relaxation is explicitly requested (`"relax": true`), the response lists the dropped fields and the summary discloses the trade-off in both modes.
+
+### 1e — Allergen safety (must exclude, not just avoid)
+- **Type exactly:** `Lunch, no seafood`
+- **Expected `parsed →` badge:** `allergens: crustacean+fish+mollusk`.
+- **Expected cards (safe full-lunch venues only):** Café 88, Sun Kee Curry House, Green Bowl Salad Bar.
+- **Verify:** Water Street Noodle House, Pokfulam Thai & Grill, Dim Sum Dynasty, Hana Sushi, Jade Garden Vegetarian, and Sweet Corner Desserts must **NOT** appear; the summary contains “For safety, I excluded restaurants containing crustaceans, fish, mollusks.”
+- **Also test:** `I am allergic to shellfish` and `no seafood or shellfish`. In Demo mode these must work even if the LLM is not configured.
+- **Dietary vs allergen:** `cheap lunch I am allergic to nuts though` → badge shows `allergens: peanut+tree-nut` but **no** `dietary: nut-free`; **no cards** (Sweet Corner is excluded as a dessert venue, Sun Kee is excluded by tree nuts) and the summary says “No suitable restaurant found.” `nut-free lunch` → badge shows `dietary: nut-free`, **no** `allergens`; only Green Bowl appears. `celiac lunch` → badge shows `allergens: gluten`, **no** `dietary: gluten-free`.
+- **Safety rule:** allergen filters are never relaxed, even with `"relax": true`.
+
+### 1f — Soft preferences (strict first, disclosed fallback)
+- **Type exactly:** `Cheap noodle lunch`
+- **Expected behavior:** no cheap noodle venue exists. The system falls back to hard-constraint matches: **Sun Kee Curry House** only (`$`, lunch). Sweet Corner Desserts is excluded because it is a dessert/snack venue, not a full lunch.
+- **Expected UI:** a `⚠️ No exact preference match (cuisines)` badge; the card shows `⚠️ Partial match: cuisine: Noodles`; summary explicitly says **“No restaurant matches all your preferences (cuisine); I’m showing the closest options that satisfy your hard constraints.”**
+- **Also test:** `Cheap curry for dinner, student budget` → parsed badge includes `cuisines: Indian` (deterministic enrichment, even if the LLM omits it) and **only Sun Kee Curry House** appears (Sweet Corner excluded because cuisine is a soft preference); `Cheap vegan snack` → fallback **Sweet Corner** with `⚠️ Partial match: dietary: vegan` (snack requests still allow dessert venues); `Vegan lunch near campus` → only vegan venues.
+- **Full meals:** `Cheap lunch` and `Dinner at 22:30, anywhere` must **not** include Sweet Corner Desserts; `Cheap dessert` and `Cheap vegan snack` may include it.
+- **Verify:** hard constraints (price, meal, allergens) always hold; fallback appears only when no restaurant satisfies both hard and soft constraints.
 
 ---
 

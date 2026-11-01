@@ -11,6 +11,7 @@ const EXAMPLES = [
 const RELAX_LABELS = {
   price_level: 'price',
   dietary: 'dietary',
+  allergens: 'allergens',
   cuisines: 'cuisine',
   open_at: 'opening time',
   meal: 'meal',
@@ -24,6 +25,7 @@ function StructuredBadge({ structured }) {
   if (structured.price_level) parts.push(`price: ${'$'.repeat(structured.price_level)}`)
   if (structured.open_at) parts.push(`open at ${structured.open_at}`)
   if (structured.dietary?.length) parts.push(`dietary: ${structured.dietary.join('+')}`)
+  if (structured.allergens?.length) parts.push(`allergens: ${structured.allergens.join('+')}`)
   if (!parts.length) return null
   return <div className="structured-badge">parsed → {parts.join(' · ')}</div>
 }
@@ -76,6 +78,13 @@ export default function ChatBox({ thread, busy, onSend, mode, chatModeLabel, err
             <div key={i} className="msg assistant">
               {m.status === 'no_match' && (
                 <div className="no-match-badge">🚫 No suitable restaurant found</div>
+              )}
+              {m.soft_fallback && (
+                <div className="soft-fallback-badge">
+                  ⚠️ No exact preference match
+                  {m.unmet_soft?.length ? ` (${m.unmet_soft.join(', ')})` : ''} —
+                  showing closest hard-constraint options
+                </div>
               )}
               {m.relaxed?.length > 0 && (
                 <div className="relaxed-badge">

@@ -13,6 +13,7 @@ const EMPTY_FILTERS = {
   priceLevel: null,
   cuisines: [],
   dietary: [],
+  allergens: [],
   openAt: '',
 }
 
@@ -28,6 +29,7 @@ export default function App() {
   const [llmConfig, setLlmConfig] = useState(null)
   const [showConfig, setShowConfig] = useState(false)
   const [error, setError] = useState('')
+  const [listNotice, setListNotice] = useState('')
 
   const refreshMeta = useCallback(async () => {
     try {
@@ -61,10 +63,18 @@ export default function App() {
           cuisine: f.cuisines.length ? f.cuisines : undefined,
           price_level: f.priceLevel || undefined,
           dietary: f.dietary.length ? f.dietary : undefined,
+          allergens: f.allergens.length ? f.allergens : undefined,
           open_at: f.openAt || undefined,
           limit: 20,
         })
         setItems(res.items)
+        setListNotice(
+          res.soft_fallback
+            ? `No exact preference match${
+                res.unmet_soft?.length ? ` (${res.unmet_soft.join(', ')})` : ''
+              } — showing closest hard-constraint options.`
+            : '',
+        )
       } catch (e) {
         setError(`Explore failed: ${e.message}`)
       } finally {
@@ -93,6 +103,7 @@ export default function App() {
             price_level: filters.priceLevel,
             open_at: filters.openAt || null,
             dietary: filters.dietary,
+            allergens: filters.allergens,
           },
           limit: 5,
         })
@@ -107,6 +118,8 @@ export default function App() {
             provider_label: res.provider_label,
             status: res.status,
             relaxed: res.relaxed || [],
+            soft_fallback: res.soft_fallback,
+            unmet_soft: res.unmet_soft || [],
           },
         ])
         setMode('chat')
@@ -114,9 +127,15 @@ export default function App() {
           res.mode === 'llm' ? `LLM: ${res.provider_label}` : 'Demo mode (keyword parser)',
         )
         setItems(res.picks)
+        setListNotice(
+          res.soft_fallback
+            ? 'No exact preference match — showing closest hard-constraint options.'
+            : '',
+        )
       } catch (e) {
         setError(`Chat failed: ${e.message}`)
         setThread((t) => [...t, { role: 'assistant', summary: `⚠️ ${e.message}`, picks: [] }])
+        setListNotice('')
       } finally {
         setBusy(false)
       }
@@ -177,6 +196,7 @@ export default function App() {
             onSelect={(id) => setSelectedId(id)}
             mode={mode}
             busy={busy}
+            notice={listNotice}
           />
         </main>
       </div>
