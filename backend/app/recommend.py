@@ -8,6 +8,8 @@ from __future__ import annotations
 from typing import Iterable
 
 from .allergens import detect_allergens
+from .preferences import match_preferences, normalize_preference_tags
+from .retrieval import bm25, build_index, build_query_terms
 from .schemas import ParseResult
 
 PRICE_SYMBOL = {1: "$", 2: "$$", 3: "$$$"}
@@ -83,52 +85,77 @@ def _cuisine_match(restaurant: dict, cuisines: list[str]) -> bool:
     return any(w in a for w in wanted for a in actual)
 
 
+def _time_minutes(open_at: str | None) -> int | None:
+    """Parse 'HH:MM' into minutes, or None when absent/unparseable."""
+    if not open_at:
+        return None
+    try:
+        return int(str(open_at)[:2]) * 60 + int(str(open_at)[3:5])
+    except (ValueError, TypeError):
+        return None
+
+
+def hard_constraint_violation(restaurant: dict, p: ParseResult) -> str | None:
+    """Return the first hard constraint the venue violates, or None when safe.
+
+    This is the authoritative safety check. It is used both when building the
+    candidate pool and when validating any LLM-selected pick, so the LLM can
+    never reintroduce a venue that violates allergens, meal, price/relaxation
+    state, opening time, or `avoid`.
+    """
+    meal = (p.meal or "").strip().lower() or None
+    if meal and meal not in (restaurant.get("meal_categories") or []):
+        return "meal"
+    # Full meals should not return dessert/snack venues.
+    if meal in FULL_MEALS and _is_snack_venue(restaurant):
+        return "meal"
+    price = p.price_level
+    if price and restaurant.get("price_level") != price:
+        return "price_level"
+    time_min = _time_minutes(p.open_at)
+    if time_min is not None and not _open_at(restaurant, time_min):
+        return "open_at"
+    # Safety-critical: never accept a venue that may contain a requested allergen.
+    wanted_allergens = set(p.allergens or [])
+    if wanted_allergens and wanted_allergens & detect_allergens(restaurant):
+        return "allergens"
+    hay = _text_haystack(restaurant)
+    if any(a.lower() in hay for a in (p.avoid or []) if a):
+        return "avoid"
+    return None
+
+
 def filter_and_score(restaurants: Iterable[dict], p: ParseResult) -> list[dict]:
     """Return all hard-constraint matches, scored and annotated with soft flags.
 
     Hard constraints: meal, price, open_at, allergens, avoid.
-    Soft preferences: dietary, cuisines. Keywords remain ranking signals only.
+    Soft preferences: dietary, cuisines, dish_intent/texture/vibe.
+    Hybrid ranking adds BM25 lexical relevance over restaurant documents.
     """
+    restaurants = list(restaurants)
+    index = build_index(restaurants)
+    query_terms = build_query_terms(p)
+
     meal = (p.meal or "").strip().lower() or None
     price = p.price_level
-    open_at = (p.open_at or "").strip()
-    time_min: int | None = None
-    if open_at:
-        try:
-            time_min = int(open_at[:2]) * 60 + int(open_at[3:5])
-        except (ValueError, TypeError):
-            time_min = None
-
-    wanted_allergens = set(p.allergens or [])
     wanted_dietary = [d for d in (p.dietary or []) if d]
     wanted_cuisines = [c for c in (p.cuisines or []) if c]
 
     scored = []
-    for r in restaurants:
-        # Hard constraints
-        if meal and meal not in (r.get("meal_categories") or []):
-            continue
-        # Full meals should not return dessert/snack venues.
-        if meal in FULL_MEALS and _is_snack_venue(r):
-            continue
-        if price and r.get("price_level") != price:
-            continue
-        if time_min is not None and not _open_at(r, time_min):
-            continue
-        # Safety-critical: never return a venue that may contain a requested allergen.
-        if wanted_allergens and wanted_allergens & detect_allergens(r):
+    for idx, r in enumerate(restaurants):
+        # Hard constraints (shared with LLM re-rank validation).
+        if hard_constraint_violation(r, p):
             continue
 
         hay = _text_haystack(r)
-        if p.avoid:
-            if any(a.lower() in hay for a in p.avoid if a):
-                continue
 
         # Soft preferences
         dietary = r.get("dietary") or []
         dietary_ok = all(d in dietary for d in wanted_dietary)
         cuisine_ok = _cuisine_match(r, wanted_cuisines)
-        soft_ok = dietary_ok and cuisine_ok
+        pref = match_preferences(r, p)
+        preference_ok = pref["ok"]
+        soft_ok = dietary_ok and cuisine_ok and preference_ok
 
         score = round(r.get("rating", 0) * 10, 1)
         reasons = []
@@ -144,6 +171,15 @@ def filter_and_score(restaurants: Iterable[dict], p: ParseResult) -> list[dict]:
         if wanted_dietary and dietary_ok:
             score += 4
             reasons.append("matches dietary: " + "+".join(wanted_dietary))
+        if p.dish_intent and pref["dish_intent_ok"]:
+            score += 6
+            reasons.append("matches dish: " + "/".join(p.dish_intent))
+        if p.texture and pref["texture_ok"]:
+            score += 4
+            reasons.append("matches texture: " + "/".join(p.texture))
+        if p.vibe and pref["vibe_ok"]:
+            score += 3
+            reasons.append("matches vibe: " + "/".join(p.vibe))
         kw_hits = [k for k in (p.keywords or []) if len(k) >= 3 and k.lower() in hay]
         for k in kw_hits[:3]:
             score += 2
@@ -163,6 +199,9 @@ def filter_and_score(restaurants: Iterable[dict], p: ParseResult) -> list[dict]:
             soft_mismatches.append("dietary: " + "+".join(missing))
         if wanted_cuisines and not cuisine_ok:
             soft_mismatches.append("cuisine: " + "/".join(wanted_cuisines))
+        soft_mismatches.extend(pref["mismatches"])
+
+        raw_bm25 = bm25(query_terms, index["docs"][idx], index)
 
         scored.append(
             {
@@ -172,9 +211,20 @@ def filter_and_score(restaurants: Iterable[dict], p: ParseResult) -> list[dict]:
                 "soft_ok": soft_ok,
                 "dietary_ok": dietary_ok,
                 "cuisine_ok": cuisine_ok,
+                "preference_ok": preference_ok,
+                "raw_bm25": raw_bm25,
                 "soft_mismatches": soft_mismatches,
             }
         )
+
+    # Normalize BM25 to a 0-8 bonus so it complements (not dominates) quality,
+    # distance, hard-constraint and structured-preference signals.
+    max_bm25 = max((c["raw_bm25"] for c in scored), default=0.0)
+    if max_bm25 > 0:
+        for c in scored:
+            lexical = 8.0 * c["raw_bm25"] / max_bm25
+            c["score"] += round(lexical, 2)
+            c["lexical_score"] = round(lexical, 2)
 
     scored.sort(key=lambda x: (-x["score"], -x["restaurant"].get("rating", 0)))
     return scored
@@ -199,7 +249,11 @@ def split_soft_matches(
     fallback = sorted(
         scored,
         key=lambda s: (
-            -(int(s["dietary_ok"]) + int(s["cuisine_ok"])),
+            -(
+                int(s["dietary_ok"])
+                + int(s["cuisine_ok"])
+                + int(s["preference_ok"])
+            ),
             -s["score"],
             -s["restaurant"].get("rating", 0),
         ),
@@ -209,7 +263,56 @@ def split_soft_matches(
         requested.append("dietary")
     if p.cuisines:
         requested.append("cuisines")
+    if p.dish_intent or p.texture or p.vibe:
+        requested.append("preferences")
     return fallback, {"soft_fallback": True, "unmet_soft": requested}
+
+
+def search_ranked_pool(
+    restaurants: Iterable[dict], p: ParseResult, pool_limit: int
+) -> tuple[list[dict], dict, ParseResult, list[str]]:
+    """Rank with strict/fallback semantics, but let food-type intent outrank price.
+
+    If a cuisine/dish/texture/vibe request cannot be satisfied inside the
+    requested price band, try relaxing only the price filter. If that produces a
+    strict soft match, return it and disclose the price relaxation. Safety and
+    logistics constraints (allergens, meal, time, avoid) are never relaxed here.
+
+    Returns up to `pool_limit` deterministically ordered candidates (the
+    candidate set the constrained LLM re-ranker may choose from), plus the soft
+    metadata, the effective parse, and the relaxed fields.
+    """
+    restaurants = list(restaurants)
+    scored = filter_and_score(restaurants, p)
+    selected, meta = split_soft_matches(scored, p)
+    effective = p
+    relaxed: list[str] = []
+
+    has_food_type = bool(p.cuisines or p.dish_intent or p.texture or p.vibe)
+    if p.price_level and has_food_type and (not selected or meta["soft_fallback"]):
+        price_relaxed = p.model_copy(deep=True)
+        price_relaxed.price_level = None
+        relaxed_scored = filter_and_score(restaurants, price_relaxed)
+        relaxed_selected, relaxed_meta = split_soft_matches(
+            relaxed_scored, price_relaxed
+        )
+        if relaxed_selected and not relaxed_meta["soft_fallback"]:
+            selected, meta = relaxed_selected, relaxed_meta
+            effective = price_relaxed
+            relaxed = ["price_level"]
+
+    return selected[:pool_limit], meta, effective, relaxed
+
+
+def search_ranked(
+    restaurants: Iterable[dict], p: ParseResult, limit: int
+) -> tuple[list[dict], dict, ParseResult, list[str]]:
+    """Ranking entry point returning at most `limit` picks.
+
+    Thin wrapper over `search_ranked_pool`; the chat pipeline uses the pool
+    variant so the constrained LLM re-ranker can choose from top-K candidates.
+    """
+    return search_ranked_pool(restaurants, p, limit)
 
 
 def card(restaurant: dict, reason: str = "") -> dict:
@@ -231,6 +334,9 @@ def card(restaurant: dict, reason: str = "") -> dict:
         "walk_minutes": restaurant.get("walk_minutes"),
         "hero_image": restaurant.get("hero_image", ""),
         "tags": restaurant.get("tags", []),
+        "preference_tags": normalize_preference_tags(
+            restaurant.get("preference_tags") or []
+        ),
         "allergens": sorted(detect_allergens(restaurant)),
         "reason": reason,
     }

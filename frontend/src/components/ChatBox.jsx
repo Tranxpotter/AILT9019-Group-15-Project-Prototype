@@ -13,6 +13,7 @@ const RELAX_LABELS = {
   dietary: 'dietary',
   allergens: 'allergens',
   cuisines: 'cuisine',
+  preferences: 'preference',
   open_at: 'opening time',
   meal: 'meal',
 }
@@ -22,6 +23,9 @@ function StructuredBadge({ structured }) {
   const parts = []
   if (structured.meal) parts.push(`meal: ${structured.meal}`)
   if (structured.cuisines?.length) parts.push(`cuisines: ${structured.cuisines.join(', ')}`)
+  if (structured.dish_intent?.length) parts.push(`dish: ${structured.dish_intent.join('/')}`)
+  if (structured.texture?.length) parts.push(`texture: ${structured.texture.join('/')}`)
+  if (structured.vibe?.length) parts.push(`vibe: ${structured.vibe.join('/')}`)
   if (structured.price_level) parts.push(`price: ${'$'.repeat(structured.price_level)}`)
   if (structured.open_at) parts.push(`open at ${structured.open_at}`)
   if (structured.dietary?.length) parts.push(`dietary: ${structured.dietary.join('+')}`)
@@ -90,6 +94,17 @@ export default function ChatBox({ thread, busy, onSend, mode, chatModeLabel, err
                 <div className="relaxed-badge">
                   ⚠️ Relaxed filter(s):{' '}
                   {m.relaxed.map((f) => RELAX_LABELS[f] || f).join(', ')}
+                </div>
+              )}
+              {m.selection_mode === 'llm_rerank' && (
+                <div className="selection-badge">
+                  🎯 LLM re-ranked {m.candidate_count} candidate
+                  {m.candidate_count === 1 ? '' : 's'}
+                </div>
+              )}
+              {m.selection_mode === 'fallback' && (
+                <div className="selection-badge fallback" title={m.selection_note || ''}>
+                  ↩︎ Deterministic ranking (LLM selection unavailable)
                 </div>
               )}
               <p className={`summary ${m.mode === 'demo' ? 'demo' : ''}`}>{m.summary}</p>

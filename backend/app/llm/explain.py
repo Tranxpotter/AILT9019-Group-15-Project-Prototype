@@ -33,6 +33,7 @@ _FIELD_LABELS = {
     "dietary": "dietary",
     "allergens": "allergens",
     "cuisines": "cuisine",
+    "preferences": "preference",
     "open_at": "opening time",
     "meal": "meal",
 }
@@ -53,6 +54,12 @@ def constraint_labels(p: ParseResult) -> list[str]:
         labels.append("dietary=" + "+".join(p.dietary))
     if p.allergens:
         labels.append("allergens=" + "+".join(p.allergens))
+    if p.dish_intent:
+        labels.append("dish=" + "/".join(p.dish_intent))
+    if p.texture:
+        labels.append("texture=" + "/".join(p.texture))
+    if p.vibe:
+        labels.append("vibe=" + "/".join(p.vibe))
     if p.avoid:
         labels.append("avoid=" + "/".join(p.avoid))
     return labels
@@ -156,6 +163,16 @@ def explain_llm(
             f"{allergen_labels}. The backend already excluded venues containing them; "
             "do not claim any restaurant is allergen-free unless it is in the provided list."
         )
+    if p.dish_intent or p.texture or p.vibe:
+        lines.append(
+            "PREFERENCES: dish_intent="
+            + "/".join(p.dish_intent or [])
+            + "; texture="
+            + "/".join(p.texture or [])
+            + "; vibe="
+            + "/".join(p.vibe or [])
+            + ". The backend ranked candidates by these preferences; explain how each pick fits."
+        )
     if relaxed:
         relaxed_labels = ", ".join(_FIELD_LABELS.get(f, f) for f in relaxed)
         lines.append(
@@ -208,6 +225,13 @@ def demo_summary(
         labels.append(f"open at {p.open_at}")
     if not soft_fallback and p.dietary:
         labels.append("+".join(p.dietary))
+    if not soft_fallback:
+        if p.dish_intent:
+            labels.append("/".join(p.dish_intent))
+        if p.texture:
+            labels.append("/".join(p.texture))
+        if p.vibe:
+            labels.append("/".join(p.vibe))
     if p.allergens:
         labels.append(
             "no " + "/".join(ALLERGEN_SHORT_LABELS.get(a, a) for a in p.allergens)

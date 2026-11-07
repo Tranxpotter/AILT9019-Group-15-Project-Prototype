@@ -8,7 +8,8 @@ generated for testing.
 ## Features
 
 - **💬 Chat recommender** — type *"cheap halal lunch, no pork, near Water Street"*
-  and get structured filters → deterministic ranking → LLM-written explanation.
+  and get structured filters → deterministic candidate ranking → **constrained
+  LLM re-rank/pick** → LLM-written explanation.
 - **⚡ Quick filters** — meal (breakfast/lunch/dinner/snack), cost ($/$$/$$$),
   cuisine, dietary (vegetarian/vegan/halal/no-pork/gluten-free/nut-free),
   **allergens** (seafood/fish/shellfish/peanut/tree-nut/gluten/dairy/egg/soy/
@@ -48,6 +49,7 @@ AILT9019-Project-Prototype2/
 │   │   ├── llm/
 │   │   │   ├── providers.py  # OpenAI-compat / Anthropic / Gemini adapters
 │   │   │   ├── parse.py      # chat -> structured filters (LLM + keyword fallback)
+│   │   │   ├── rerank.py     # constrained LLM selection + backend validation (Phase 3)
 │   │   │   └── explain.py    # recommendation explanations (LLM + template)
 │   │   └── routers/          # restaurants, chat, llm-config
 │   ├── scripts/
@@ -122,18 +124,24 @@ Click **⚙️ LLM Config** in the header:
 Use **Test connection** before saving. Save, then the header pill switches to
 `⚡ provider: model` and chat responses are labeled *LLM mode*.
 
-### How the two LLM calls work
+### How the three LLM calls work
 
 1. **Parse**: your message + current filter chips → strict JSON
    (`meal`, `cuisines`, `price_level`, `open_at`, `dietary`, `keywords`, `avoid`).
    OpenAI-compatible endpoints use `response_format: json_object`;
    Anthropic uses a forced `tool_use`; Gemini uses `responseSchema`.
-2. **Explain**: the ranked candidates + parsed filters → `{summary, picks:{id: reason}}`.
+2. **Select/re-rank (Phase 3, optional)**: the backend hands the LLM the top-K
+   deterministically ranked candidates and asks it to choose/order up to N of
+   them (ids only) with a short reason each. Every pick is re-validated; failures
+   fall back to the deterministic order (see Phase 3 below).
+3. **Explain**: the final ordered picks + parsed filters →
+   `{summary, picks:{id: reason}}`.
 
-Ranking itself is **deterministic in the backend** (`recommend.py`) so results
-stay reproducible; the LLM never queries the DB directly. If parsing fails or no
+Candidate generation is **deterministic in the backend** (`recommend.py`) so
+results stay reproducible; the LLM never queries the DB directly and can never
+introduce a restaurant the backend did not generate. If parsing fails or no
 LLM is configured, the built-in keyword parser + template explanations kick in
-(demo mode).
+(demo mode, which is always deterministic).
 
 ### Honest empty results (no silent relaxation)
 
@@ -158,14 +166,107 @@ matches and explicitly says so in the summary (`status: "soft_fallback"`,
 `soft_fallback: true`, `unmet_soft: ["dietary"|"cuisines"]`). Fallback cards
 carry `soft_mismatches` so the UI can show which preference is unmet.
 
-Keywords remain ranking signals for now; richer preference matching (e.g.
-"soup noodles") is Phase 2.
+Keywords remain additional ranking signals. Phase 2 adds richer preference
+matching (dish_intent, texture, vibe) plus BM25 hybrid ranking; see below.
 
 Soft preferences are also enriched deterministically: explicit dish/cuisine
 words (curry→Indian, sushi→Japanese, noodles→Noodles, dessert→Desserts, dim
 sum→Dim Sum, ...) are added to `cuisines` even if the LLM omits them, and
 explicit diet phrases (vegan, halal, no pork, nut-free, gluten-free, ...) are
 added to `dietary`. This keeps soft gating consistent across models.
+
+### Richer preferences & hybrid ranking (Phase 2)
+
+Beyond cuisine and dietary labels, the parser extracts three preference
+categories:
+
+- **`dish_intent`** — soup noodles, wonton, ramen, udon, pad thai, tom yum,
+  sashimi, grain bowl, rice bowl.
+- **`texture`** — soup, broth, wet, dry, crispy, grilled, fried, steamed, raw,
+  cold, hot, spicy.
+- **`vibe`** — comforting, hearty, light, fresh, quick, quiet, group-friendly,
+  date-night, late-night, casual.
+
+Each venue carries curated `preference_tags`. Ranking is hybrid:
+
+1. Hard constraints (meal, price, opening time, allergens, avoid, full-meal rule).
+2. Strict soft preferences (dietary, cuisine, preference categories).
+3. Weighted score: quality, distance, cuisine/dietary/preference matches,
+   keyword hits, and **BM25 lexical relevance** over the venue document
+   (description + menu + tags + reviews).
+4. If no restaurant matches all soft preferences, hard-only fallback with an
+   explicit summary disclosure.
+
+Preference terms are enriched deterministically from explicit phrases even if
+the LLM omits them. The Explore API accepts `dish_intent`, `texture`, and `vibe`
+query parameters.
+
+**Food-type intent outranks price.** If a cuisine/dish/texture/vibe match exists
+only outside the requested price band, the backend relaxes **only price**, returns
+the food-type matches, and discloses the relaxation (`relaxed: ["price_level"]`
+plus a summary note). Safety (allergens), meal and time are never relaxed this
+way. Requests without food-type intent (e.g. "cheap vegan breakfast") still
+refuse honestly when no cheap match exists.
+
+### Constrained LLM re-ranking / selection (Phase 3)
+
+For nuanced requests ("soup noodles", "comforting", "date night") static score
+ordering is not enough. When an LLM is configured, the chat pipeline becomes:
+
+```text
+parse -> candidate generation (top-K) -> optional LLM re-rank -> backend
+validation -> final picks -> explanation
+```
+
+1. **Candidate generation** is unchanged and deterministic: hard filters →
+   strict soft preferences (or disclosed fallback) → weighted + BM25 ranking.
+   The chat endpoint keeps up to `LLM_RERANK_POOL` (default 15) candidates with
+   their facts: id, name, cuisine, price, distance, rating, tags, preference
+   tags, dietary, detected allergens, opening hours, menu highlights, matched
+   reasons and unmet soft preferences.
+2. **Constrained selection**: the LLM receives the request, the applied filters,
+   the safety list, the relaxation/soft-fallback disclosures, and the candidate
+   fact sheet. It must return JSON `{picks:[{id, reason}], summary}` using ids
+   copied from that list only.
+3. **Backend validation** (the authority): unknown ids, non-candidate ids,
+   duplicates, and picks violating any hard constraint (allergens, meal,
+   price/relaxation state, opening time, `avoid`) are rejected. Missing slots
+   are repaired from the deterministic ranking.
+4. **Graceful fallback**: provider errors, timeouts, invalid JSON, or an empty
+   selection return the deterministic order unchanged. The selector is never
+   called when ranking finds nothing (so the honest "no match" refusal is
+   preserved).
+
+**When does the re-rank run?** Whenever an LLM is configured (provider + model)
+and ranking produced candidates — provided the feature flag is on and the
+request didn't set `"rerank": false`. It is **not** gated on the parse step: if
+the parse call times out or returns invalid JSON and falls back to the keyword
+parser (`mode: "demo"`), the selector still runs on the deterministically
+generated candidates. Only a backend with **no LLM configured** is always
+deterministic, and that is what "Demo mode" means here.
+
+Responses expose `selection_mode` — `llm_rerank` (validated LLM selection),
+`deterministic` (no LLM selection attempted), or `fallback` (LLM attempt failed
+or was rejected) — plus `candidate_count` and, on fallback, `selection_note`
+with the diagnostic cause (e.g. timeout, invalid output). The UI shows a
+`🎯 LLM re-ranked N candidates` badge for successful selection and a subtle
+`↩︎ Deterministic ranking` badge when a selection attempt fell back. The
+existing badges/notices (`relaxed`, soft fallback, allergen disclosure) are
+unchanged, and the LLM can never invent restaurants, attributes, or override a
+safety constraint.
+
+Configuration (environment variables):
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `LLM_RERANK_ENABLED` | `1` | Feature flag; `0` disables the selector |
+| `LLM_RERANK_POOL` | `15` | Number of deterministic candidates offered to the LLM |
+| `LLM_RERANK_TIMEOUT_SECONDS` | `12` | Wall-clock budget before deterministic fallback |
+
+`POST /api/chat` also accepts `"rerank": false` to disable the selector for a
+single request (e.g. testing). The trade-off is a slightly higher latency/cost
+per chat, bounded by the small candidate set, strict schema, timeout, and the
+deterministic fallback.
 
 ### Full meals vs. snacks
 
@@ -208,9 +309,9 @@ an allergy request unless the user explicitly asked for that certification.
 |---|---|---|
 | GET | `/api/health` | liveness + restaurant count |
 | GET | `/api/meta` | meals, cuisines, dietary + allergen options, map centre |
-| GET | `/api/restaurants` | filtered list (meal/cuisine/price/dietary/allergens/open_at/q) + `soft_fallback`/`unmet_soft` |
+| GET | `/api/restaurants` | filtered list (meal/cuisine/price/dietary/allergens/dish_intent/texture/vibe/open_at/q) + `status`/`soft_fallback`/`unmet_soft`/`relaxed` |
 | GET | `/api/restaurants/{id}` | full detail: menu, reviews, images |
-| POST | `/api/chat` | `{message, filters?, limit?, relax?}` → picks + summary + `status`/`soft_fallback`/`unmet_soft`/`relaxed` (filters include `allergens`) |
+| POST | `/api/chat` | `{message, filters?, limit?, relax?, rerank?}` → picks + summary + `status`/`soft_fallback`/`unmet_soft`/`relaxed`/`selection_mode`/`candidate_count`/`selection_note` (filters include `allergens`) |
 | GET/PUT | `/api/llm-config` | read / save LLM settings |
 | GET | `/api/llm-config/providers` | provider catalog with defaults |
 | POST | `/api/llm-config/test` | connectivity test with submitted settings |
@@ -233,6 +334,7 @@ cd backend
 .venv/bin/python scripts/test_no_match.py        # strict refusal / disclosed relaxation (M1)
 .venv/bin/python scripts/test_allergens.py       # deterministic allergen safety (Phase 1)
 .venv/bin/python scripts/test_soft_preferences.py # strict-first soft preferences + fallback
+.venv/bin/python scripts/test_rerank.py          # constrained LLM re-rank: validation, fallback, timeout (Phase 3)
 # requires backend running on :8010:
-.venv/bin/python scripts/test_chat_e2e.py        # full LLM chat path (mock endpoint)
+.venv/bin/python scripts/test_chat_e2e.py        # full LLM chat path: parse -> re-rank -> explain (mock endpoint)
 ```

@@ -376,3 +376,26 @@ ALLERGENS = {
 for _restaurant in RESTAURANTS:
     _restaurant["allergens"] = ALLERGENS.get(_restaurant["id"], [])
 
+# Curated preference tags used by the structured preference matcher and BM25
+# retrieval. Canonical tags come from `app.preferences`.
+PREFERENCE_TAGS = {
+    "water-street-noodle-house": [
+        "soup noodles", "wonton", "soup", "wet", "broth", "comforting", "quick",
+    ],
+    "cafe-88": ["light", "fresh", "quick", "casual"],
+    "sun-kee-curry-house": ["wet", "spicy", "comforting"],
+    "pokfulam-thai-grill": [
+        "pad thai", "tom yum", "grilled", "spicy", "group-friendly", "soup",
+    ],
+    "dim-sum-dynasty": ["steamed", "group-friendly"],
+    "green-bowl-salad-bar": ["grain bowl", "rice bowl", "light", "fresh", "quick"],
+    "kennedy-town-grill-house": ["grilled", "fried", "hearty", "date-night"],
+    "jade-garden-vegetarian": ["soup", "comforting", "quiet", "light", "fresh"],
+    "hana-sushi": ["sashimi", "ramen", "udon", "soup", "raw", "date-night"],
+    "sweet-corner-desserts": ["cold", "soup", "late-night", "quick"],
+}
+
+for _restaurant in RESTAURANTS:
+    _restaurant["preference_tags"] = PREFERENCE_TAGS.get(_restaurant["id"], [])
+
+

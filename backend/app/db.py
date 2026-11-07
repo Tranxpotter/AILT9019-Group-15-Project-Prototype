@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS restaurants (
     walk_minutes    INTEGER NOT NULL,
     dietary         TEXT NOT NULL DEFAULT '[]',
     allergens       TEXT NOT NULL DEFAULT '[]',
+    preference_tags TEXT NOT NULL DEFAULT '[]',
     tags            TEXT NOT NULL DEFAULT '[]',
     opening         TEXT NOT NULL DEFAULT '[]',
     description     TEXT NOT NULL DEFAULT '',
@@ -57,11 +58,15 @@ def init_db() -> None:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     with get_conn() as conn:
         conn.executescript(SCHEMA)
-        # Migrate databases created before allergen support.
+        # Migrate databases created before allergen/preference support.
         cols = {row[1] for row in conn.execute("PRAGMA table_info(restaurants)").fetchall()}
         if "allergens" not in cols:
             conn.execute(
                 "ALTER TABLE restaurants ADD COLUMN allergens TEXT NOT NULL DEFAULT '[]'"
+            )
+        if "preference_tags" not in cols:
+            conn.execute(
+                "ALTER TABLE restaurants ADD COLUMN preference_tags TEXT NOT NULL DEFAULT '[]'"
             )
         conn.execute(
             "INSERT OR IGNORE INTO llm_config (id, provider, updated_at) VALUES (1, 'none', ?)",
@@ -91,6 +96,7 @@ def row_to_restaurant(row: sqlite3.Row) -> dict:
         "meal_categories",
         "dietary",
         "allergens",
+        "preference_tags",
         "tags",
         "opening",
         "menu",
@@ -103,7 +109,7 @@ def row_to_restaurant(row: sqlite3.Row) -> dict:
 def upsert_restaurants(restaurants: list[dict]) -> None:
     cols = (
         "id,name,cuisine,cuisine_tags,meal_categories,price_level,avg_cost,rating,"
-        "review_count,address,area,lat,lng,walk_minutes,dietary,allergens,tags,opening,"
+        "review_count,address,area,lat,lng,walk_minutes,dietary,allergens,preference_tags,tags,opening,"
         "description,hero_image,interior_image,menu_image,menu,reviews"
     )
     with get_conn() as conn:
@@ -126,6 +132,7 @@ def upsert_restaurants(restaurants: list[dict]) -> None:
                 r.get("walk_minutes", 0),
                 json.dumps(r.get("dietary", []), ensure_ascii=False),
                 json.dumps(r.get("allergens", []), ensure_ascii=False),
+                json.dumps(r.get("preference_tags", []), ensure_ascii=False),
                 json.dumps(r.get("tags", []), ensure_ascii=False),
                 json.dumps(r.get("opening", []), ensure_ascii=False),
                 r.get("description", ""),

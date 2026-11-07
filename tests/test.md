@@ -62,13 +62,20 @@
 - **Dietary vs allergen:** `cheap lunch I am allergic to nuts though` → badge shows `allergens: peanut+tree-nut` but **no** `dietary: nut-free`; **no cards** (Sweet Corner is excluded as a dessert venue, Sun Kee is excluded by tree nuts) and the summary says “No suitable restaurant found.” `nut-free lunch` → badge shows `dietary: nut-free`, **no** `allergens`; only Green Bowl appears. `celiac lunch` → badge shows `allergens: gluten`, **no** `dietary: gluten-free`.
 - **Safety rule:** allergen filters are never relaxed, even with `"relax": true`.
 
-### 1f — Soft preferences (strict first, disclosed fallback)
+### 1f — Soft preferences: food-type intent outranks price
 - **Type exactly:** `Cheap noodle lunch`
-- **Expected behavior:** no cheap noodle venue exists. The system falls back to hard-constraint matches: **Sun Kee Curry House** only (`$`, lunch). Sweet Corner Desserts is excluded because it is a dessert/snack venue, not a full lunch.
-- **Expected UI:** a `⚠️ No exact preference match (cuisines)` badge; the card shows `⚠️ Partial match: cuisine: Noodles`; summary explicitly says **“No restaurant matches all your preferences (cuisine); I’m showing the closest options that satisfy your hard constraints.”**
-- **Also test:** `Cheap curry for dinner, student budget` → parsed badge includes `cuisines: Indian` (deterministic enrichment, even if the LLM omits it) and **only Sun Kee Curry House** appears (Sweet Corner excluded because cuisine is a soft preference); `Cheap vegan snack` → fallback **Sweet Corner** with `⚠️ Partial match: dietary: vegan` (snack requests still allow dessert venues); `Vegan lunch near campus` → only vegan venues.
+- **Expected behavior:** no **cheap** noodle venue exists, but food-type intent outranks price. The system relaxes **only the price filter** and returns **Water Street Noodle House** (`$$`, Noodles, lunch).
+- **Expected UI:** a `⚠️ Relaxed filter(s): price` badge; the card has no `⚠️ Partial match` note; summary includes **“Note: no restaurant matched all filters, so I relaxed the price filter(s) — these picks may not meet that constraint.”**
+- **Also test (food-type over price):**
+  - `Cheap sushi lunch` → **Hana Sushi** (`$$$`), price relaxed.
+  - `Cheap Thai lunch` → **Pokfulam Thai & Grill** (`$$`), price relaxed.
+  - `Cheap grilled lunch` → **Pokfulam Thai & Grill** (`$$`), price relaxed.
+  - `Cheap healthy lunch` → **Green Bowl Salad Bar** and **Jade Garden Vegetarian** (`$$`), price relaxed.
+  - `Cheap noodle breakfast` → **Water Street Noodle House** (`$$`), price relaxed.
+- **Hard refusal preserved:** `Cheap vegan breakfast` (no cuisine/food-type intent) still returns **“No suitable restaurant found.”**
+- **Soft fallback still exists when food-type cannot be matched at any price:** `Snack, prefer grilled` → Sweet Corner fallback with `⚠️ Partial match: texture: grilled`; `Cheap vegan snack` → Sweet Corner fallback with `⚠️ Partial match: dietary: vegan`.
 - **Full meals:** `Cheap lunch` and `Dinner at 22:30, anywhere` must **not** include Sweet Corner Desserts; `Cheap dessert` and `Cheap vegan snack` may include it.
-- **Verify:** hard constraints (price, meal, allergens) always hold; fallback appears only when no restaurant satisfies both hard and soft constraints.
+- **Verify:** price is the only hard constraint relaxed by food-type priority; allergens, meal, time, and avoid remain hard.
 
 ---
 
@@ -92,9 +99,7 @@
 
 ## Test Case 3 — Factual accuracy / no hallucination
 
-**Goal:** verify the AI's description of a restaurant matches the real data (rating, price, cuisine, hours).
-
-### 3a — Rating & price accuracy
+**Goal:** verify the AI's description of a restaurant matches the real data (rating, price, cuisine, hours).### 3a — Rating & price accuracy
 - **Type exactly:** `Recommend a budget Indian curry place for dinner and tell me why it's good`
 - **Expected top card:** **Sun Kee Curry House** — `★ 4.7`, `~55 HKD`, `Indian`, `7 min walk`, `$$`? **No — single `$`**.
 - **Ground truth to cross-check (from the dataset):** rating **4.7**, avg **$55**, cuisine **Indian**, hours **11:30–22:30**, halal/vegan/vegetarian/gluten-free.
@@ -107,3 +112,32 @@
 - **Ground truth:** rating **4.5**, avg **$165**, **closed Mondays**, lunch **12:00–15:00**, dinner **18:00–22:00**.
 - **Verify — the summary/reason must NOT contain:** "open on Monday", "24 hours", "open all night", "ramen-only", or any wrong hour.
 - **Pass criterion:** hours/day claims (if any) match the ground truth; no invented schedule.
+---
+
+## Test Case 4 — Selection transparency (Phase 3)
+
+**Goal:** verify the LLM only re-ranks backend-approved candidates and that failure modes fall back to the deterministic ranking.
+
+### 4a — LLM re-rank visible
+- **Type exactly:** `Something comforting and soupy for a date night` (LLM mode).
+- **Expected UI:** a `🎯 LLM re-ranked N candidates` badge above the summary; cards ordered per the selector and each `💡 reason` written by it.
+- **Verify:** every card is a real dataset restaurant (no invented venue/attribute); the response's `selection_mode` is `llm_rerank`.
+
+### 4b — Deterministic in Demo mode
+- Set Provider = `No LLM (demo mode)` and Save, then repeat 4a.
+- **Expected UI:** no selection badge; deterministic order; `selection_mode: deterministic`.
+
+### 4c — Safety and refusal preserved
+- **Type exactly:** `Lunch, no seafood` (LLM mode) → no seafood venue may appear and the allergen disclosure must still be present, even if the selector suggested an unsafe venue.
+- **Type exactly:** `Cheap vegan breakfast` (LLM mode) → `🚫 No suitable restaurant found`, empty picks, `selection_mode: deterministic`, `candidate_count: 0`.
+- **Also:** `Cheap noodle lunch` → price relaxation is still disclosed and the noodle venue is kept.
+
+### 4d — API check
+```bash
+curl -s -X POST http://127.0.0.1:8010/api/chat -H 'Content-Type: application/json' \
+  -d '{"message":"Vegan lunch near campus","limit":5,"rerank":false}' \
+  | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['selection_mode'], d['candidate_count'])"
+# → deterministic 4
+```
+- **Verify:** the response includes `selection_mode` (`llm_rerank` | `deterministic` | `fallback`), `candidate_count`, and — on fallback — `selection_note` (e.g. `timed out`, `empty or invalid selection`).
+- **Trigger check:** with an LLM configured, the selector runs even when the parse step fell back to the keyword parser (the header pill shows `keyword parse + LLM selection: …`). Only Demo mode (no LLM configured) is always deterministic. A fallback shows a subtle `↩︎ Deterministic ranking (LLM selection unavailable)` badge.

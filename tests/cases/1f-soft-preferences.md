@@ -1,13 +1,14 @@
-# Test 1f — Soft preferences (strict first, disclosed fallback)
+# Test 1f — Soft preferences: food-type intent outranks price
 
-**Date:** 2026-10-31 · **Mode:** Demo + LLM · **Scope:** dietary and cuisine are soft preferences; hard constraints remain strict.
+**Date:** 2026-10-31 · **Mode:** Demo + LLM · **Scope:** dietary/cuisine/preferences are soft; food-type intent outranks the price band.
 
 ## Rules
 - **Hard constraints:** meal, price, opening time, allergens, avoided features.
 - **Full-meal rule:** breakfast/lunch/dinner requests exclude dessert/snack venues, even if they list that meal or are open at that time. Snack/dessert requests still allow them.
-- **Soft preferences:** dietary labels, cuisine.
+- **Soft preferences:** dietary labels, cuisine, dish_intent/texture/vibe.
 - **Strict first:** if at least one restaurant satisfies every hard constraint and every soft preference, only those restaurants are returned.
-- **Fallback:** if none do, hard-constraint matches are returned with `soft_fallback: true`, `unmet_soft` listing the soft fields, per-card `soft_mismatches`, and an explicit summary sentence: “No restaurant matches all your preferences (…); I’m showing the closest options that satisfy your hard constraints.”
+- **Food-type over price:** if a cuisine/dish/texture/vibe match exists only outside the price band, relax **only price**, return the food-type match, and disclose the relaxation (`relaxed: ["price_level"]`).
+- **Fallback:** if no food-type match exists at any price, hard-constraint matches are returned with `soft_fallback: true`, `unmet_soft`, per-card `soft_mismatches`, and an explicit summary sentence.
 
 ## Case A — Cuisine strict match
 **Input:** `Cheap curry for dinner, student budget`
@@ -18,16 +19,26 @@ Expected:
 - Sweet Corner Desserts is excluded (cuisine mismatch + dessert venue for a full meal).
 - `status: ok`, `soft_fallback: false`.
 
-## Case B — Cuisine fallback
+## Case B — Food-type over price
 **Input:** `Cheap noodle lunch`
 
 Expected:
-- No cheap noodle venue exists.
-- Fallback card: **Sun Kee Curry House** only (`$`, full lunch).
-- Sweet Corner Desserts is excluded because it is a dessert/snack venue.
-- `status: soft_fallback`, `unmet_soft: ["cuisines"]`.
-- Card shows `⚠️ Partial match: cuisine: Noodles`.
-- Summary explicitly says: **“No restaurant matches all your preferences (cuisine); I’m showing the closest options that satisfy your hard constraints.”**
+- No **cheap** noodle venue exists, but food-type intent outranks price.
+- Only **Water Street Noodle House** (`$$`, Noodles, lunch).
+- Sweet Corner Desserts is excluded as a dessert venue.
+- `status: relaxed`, `relaxed: ["price_level"]`, `soft_fallback: false`, `unmet_soft: []`.
+- Summary includes: **“Note: no restaurant matched all filters, so I relaxed the price filter(s) — these picks may not meet that constraint.”**
+- No `⚠️ Partial match` note on the card.
+
+## Case B2 — More food-type-over-price cases
+| Input | Expected |
+|---|---|
+| `Cheap sushi lunch` | **Hana Sushi** (`$$$`), price relaxed |
+| `Cheap Thai lunch` | **Pokfulam Thai & Grill** (`$$`), price relaxed |
+| `Cheap grilled lunch` | **Pokfulam Thai & Grill** (`$$`), price relaxed |
+| `Cheap healthy lunch` | **Green Bowl Salad Bar** + **Jade Garden Vegetarian** (`$$`), price relaxed |
+| `Cheap noodle breakfast` | **Water Street Noodle House** (`$$`), price relaxed |
+| `Cheap vegan breakfast` | **No suitable restaurant found** (no food-type intent; hard refusal preserved) |
 
 ## Case C — Dietary fallback
 **Input:** `Cheap vegan snack`

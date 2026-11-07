@@ -17,6 +17,21 @@ const EMPTY_FILTERS = {
   openAt: '',
 }
 
+function buildListNotice(res) {
+  if (res.relaxed?.length) {
+    const labels = res.relaxed
+      .map((f) => (f === 'price_level' ? 'price' : f))
+      .join(', ')
+    return `Relaxed ${labels} to preserve your cuisine/food-type match.`
+  }
+  if (res.soft_fallback) {
+    return `No exact preference match${
+      res.unmet_soft?.length ? ` (${res.unmet_soft.join(', ')})` : ''
+    } — showing closest hard-constraint options.`
+  }
+  return ''
+}
+
 export default function App() {
   const [meta, setMeta] = useState(null)
   const [filters, setFilters] = useState(EMPTY_FILTERS)
@@ -68,13 +83,7 @@ export default function App() {
           limit: 20,
         })
         setItems(res.items)
-        setListNotice(
-          res.soft_fallback
-            ? `No exact preference match${
-                res.unmet_soft?.length ? ` (${res.unmet_soft.join(', ')})` : ''
-              } — showing closest hard-constraint options.`
-            : '',
-        )
+        setListNotice(buildListNotice(res))
       } catch (e) {
         setError(`Explore failed: ${e.message}`)
       } finally {
@@ -120,18 +129,21 @@ export default function App() {
             relaxed: res.relaxed || [],
             soft_fallback: res.soft_fallback,
             unmet_soft: res.unmet_soft || [],
+            selection_mode: res.selection_mode,
+            candidate_count: res.candidate_count || 0,
+            selection_note: res.selection_note || '',
           },
         ])
         setMode('chat')
         setChatModeLabel(
-          res.mode === 'llm' ? `LLM: ${res.provider_label}` : 'Demo mode (keyword parser)',
+          res.mode === 'llm'
+            ? `LLM: ${res.provider_label}`
+            : res.selection_mode === 'llm_rerank'
+              ? `keyword parse + LLM selection: ${res.provider_label}`
+              : 'Demo mode (keyword parser)',
         )
         setItems(res.picks)
-        setListNotice(
-          res.soft_fallback
-            ? 'No exact preference match — showing closest hard-constraint options.'
-            : '',
-        )
+        setListNotice(buildListNotice(res))
       } catch (e) {
         setError(`Chat failed: ${e.message}`)
         setThread((t) => [...t, { role: 'assistant', summary: `⚠️ ${e.message}`, picks: [] }])

@@ -17,6 +17,7 @@ from ..allergens import (
     normalize_allergens,
 )
 from ..config import CUISINES, DIETARY_OPTIONS, MEALS
+from ..preferences import extract_preferences, normalize_preferences
 from ..schemas import ParseResult
 from .providers import LLMError, get_provider
 
@@ -25,6 +26,21 @@ PARSE_SCHEMA = {
     "properties": {
         "meal": {"type": "string", "enum": MEALS, "description": "Which meal the user plans to eat, or omit if unknown"},
         "cuisines": {"type": "array", "items": {"type": "string"}, "description": "Cuisines the user wants, e.g. Candle, Noodles, Japanese, Thai, Desserts, Indian..."},
+        "dish_intent": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "Dish-level intent, e.g. soup noodles, wonton, ramen, udon, pad thai, tom yum, sashimi, grain bowl. Do not duplicate pure cuisine words.",
+        },
+        "texture": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "Texture/style, e.g. soup, wet, dry, grilled, spicy, crispy, steamed, raw.",
+        },
+        "vibe": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "Vibe/occasion, e.g. comforting, light, quick, quiet, group-friendly, date-night, late-night.",
+        },
         "price_level": {"type": "integer", "enum": [1, 2, 3], "description": "1 = cheap ($), 2 = mid ($$), 3 = expensive ($$$). Omit if not mentioned"},
         "open_at": {"type": "string", "description": "24h 'HH:MM' when the user will eat, e.g. '13:30'. Omit if unknown"},
         "dietary": {"type": "array", "items": {"type": "string", "enum": DIETARY_OPTIONS}, "description": "Required dietary standards"},
@@ -37,7 +53,7 @@ PARSE_SCHEMA = {
         "avoid": {"type": "array", "items": {"type": "string"}, "description": "Features/dish names to explicitly avoid"},
         "notes": {"type": "string", "description": "One short sentence summarising the user's intent"},
     },
-    "required": ["meal", "cuisines", "price_level", "open_at", "dietary", "allergens", "keywords", "avoid", "notes"],
+    "required": ["meal", "cuisines", "dish_intent", "texture", "vibe", "price_level", "open_at", "dietary", "allergens", "keywords", "avoid", "notes"],
 }
 
 PARSE_SYSTEM = (
@@ -55,7 +71,11 @@ PARSE_SYSTEM = (
     "'nut-free'/'gluten-free' diet requests use `dietary`. "
     "Always extract cuisines from explicit dish/cuisine words: curry→Indian, sushi→Japanese, "
     "noodles→Noodles, dessert→Desserts, dim sum→Dim Sum, burger/steak→Burgers, "
-    "salad/bowl→Healthy, coffee/brunch→Western."
+    "salad/bowl→Healthy, coffee/brunch→Western. "
+    "Also extract richer preferences: 'soup noodles'→dish_intent=['soup noodles'], "
+    "texture=['soup','wet']; 'spicy'→texture=['spicy']; 'grilled'→texture=['grilled']; "
+    "'comforting'→vibe=['comforting']; 'quick'→vibe=['quick']; 'late night'→vibe=['late-night']. "
+    "Do not duplicate pure cuisine words (noodles, sushi, curry, dessert, healthy) in preferences."
 )
 
 
@@ -68,7 +88,7 @@ def parse_with_llm(config: dict, message: str) -> ParseResult:
         f'<message>{message}</message>\n'
         f'<schema>{PARSE_SCHEMA}</schema>'
     )
-    data = provider.chat_json(PARSE_SYSTEM, user, PARSE_SCHEMA, max_tokens=600)
+    data = provider.chat_json(PARSE_SYSTEM, user, PARSE_SCHEMA, max_tokens=900)
     return _validate(data, message)
 
 
@@ -105,9 +125,33 @@ def _validate(data: dict, message: str) -> ParseResult:
     if {"vegetarian", "vegan"} & set(dietary):
         cuisines = [c for c in cuisines if c.lower() != "vegetarian"]
 
+    # Deterministic preference enrichment: explicit phrases (soup noodles,
+    # spicy, grilled, comforting, ...) must not be lost just because the LLM
+    # omitted them. Also inspect LLM keywords for preference phrases.
+    msg_prefs = extract_preferences(message)
+    kw_prefs = extract_preferences(
+        " ".join(str(k) for k in (data.get("keywords") or []))
+    )
+    preferences = normalize_preferences(
+        {
+            "dish_intent": list(data.get("dish_intent") or [])
+            + msg_prefs["dish_intent"]
+            + kw_prefs["dish_intent"],
+            "texture": list(data.get("texture") or [])
+            + msg_prefs["texture"]
+            + kw_prefs["texture"],
+            "vibe": list(data.get("vibe") or [])
+            + msg_prefs["vibe"]
+            + kw_prefs["vibe"],
+        }
+    )
+
     return ParseResult(
         meal=(data.get("meal") or None),
         cuisines=cuisines,
+        dish_intent=preferences["dish_intent"],
+        texture=preferences["texture"],
+        vibe=preferences["vibe"],
         price_level=(data.get("price_level") or None),
         open_at=(data.get("open_at") or None),
         dietary=dietary,
@@ -143,12 +187,12 @@ DIET_WORDS = {
 CUISINE_WORDS = {
     "Cantonese": ["cantonese", "hong kong"],
     "Dim Sum": ["dim sum", "yum cha", "dumpling"],
-    "Noodles": ["noodle", "noodles", "wonton", "ramen"],
+    "Noodles": ["noodle", "noodles", "wonton"],
     "Western": ["western", "brunch", "burger", "coffee", "cafe"],
     "Indian": ["indian", "curry"],
     "Nepalese": ["nepalese"],
     "Thai": ["thai"],
-    "Japanese": ["japanese", "sushi", "japanese"],
+    "Japanese": ["japanese", "sushi", "ramen", "udon", "sashimi"],
     "Healthy": ["healthy", "salad", "salad bar", "bowl", "grain bowl"],
     "Vegetarian": ["vegetarian"],
     "Desserts": ["dessert", "dessert", "sweet", "mango sago"],
@@ -221,9 +265,13 @@ def parse_demo(message: str) -> ParseResult:
     if "not spicy" in msg or "no spicy" in msg:
         avoid.append("spicy")
 
+    prefs = extract_preferences(message)
     return ParseResult(
         meal=meal,
         cuisines=cuisines,
+        dish_intent=prefs["dish_intent"],
+        texture=prefs["texture"],
+        vibe=prefs["vibe"],
         price_level=price_level,
         open_at=open_at,
         dietary=dietary,

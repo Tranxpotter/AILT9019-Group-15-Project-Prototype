@@ -94,11 +94,19 @@ def _gemini_schema(schema: dict) -> dict:
 class BaseProvider:
     name = "base"
 
-    def __init__(self, api_key: str, base_url: str, model: str, temperature: float = 0.3):
+    def __init__(
+        self,
+        api_key: str,
+        base_url: str,
+        model: str,
+        temperature: float = 0.3,
+        timeout: float = 90.0,
+    ):
         self.api_key = api_key
         self.base_url = (base_url or "").rstrip("/")
         self.model = model
         self.temperature = temperature
+        self.timeout = timeout or 90.0
 
     def chat_json(self, system: str, user: str, schema: dict, max_tokens: int = 1024) -> dict:
         raise NotImplementedError
@@ -110,14 +118,14 @@ class BaseProvider:
 class OpenAICompatibleProvider(BaseProvider):
     """OpenAI / DeepSeek / Ollama / LM Studio / vLLM / any /v1 compatible server."""
 
-    def _post(self, payload: dict, extra_headers: Optional[dict] = None, timeout: float = 90.0) -> httpx.Response:
+    def _post(self, payload: dict, extra_headers: Optional[dict] = None, timeout: float | None = None) -> httpx.Response:
         headers = {"Content-Type": "application/json"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
         if extra_headers:
             headers.update(extra_headers)
         try:
-            with httpx.Client(timeout=timeout) as client:
+            with httpx.Client(timeout=timeout or self.timeout) as client:
                 resp = client.post(f"{self.base_url}/chat/completions", json=payload, headers=headers)
         except httpx.HTTPError as e:
             raise LLMError(f"Network error reaching {self.base_url}: {e}") from e
@@ -178,7 +186,7 @@ class AnthropicProvider(BaseProvider):
 
     def _call(self, payload: dict) -> httpx.Response:
         try:
-            with httpx.Client(timeout=90.0) as client:
+            with httpx.Client(timeout=self.timeout) as client:
                 resp = client.post(f"{self.base_url}/v1/messages", json=payload, headers=self._headers())
         except httpx.HTTPError as e:
             raise LLMError(f"Network error reaching {self.base_url}: {e}") from e
@@ -228,7 +236,7 @@ class GeminiProvider(BaseProvider):
     def _call(self, payload: dict, model: Optional[str] = None) -> httpx.Response:
         url = f"{self.base_url}/models/{model or self.model}:generateContent?key={self.api_key}"
         try:
-            with httpx.Client(timeout=90.0) as client:
+            with httpx.Client(timeout=self.timeout) as client:
                 resp = client.post(url, json=payload, headers={"Content-Type": "application/json"})
         except httpx.HTTPError as e:
             raise LLMError(f"Network error reaching {self.base_url}: {e}") from e
@@ -266,8 +274,12 @@ class GeminiProvider(BaseProvider):
         return data["candidates"][0]["content"]["parts"][0]["text"].strip()
 
 
-def get_provider(config: dict) -> Optional[BaseProvider]:
-    """Build a provider from a llm_config row, or None when no LLM is configured."""
+def get_provider(config: dict, timeout: float | None = None) -> Optional[BaseProvider]:
+    """Build a provider from a llm_config row, or None when no LLM is configured.
+
+    `timeout` overrides the default 90s HTTP budget (used by the bounded
+    re-ranking call so a slow selector can never stall the chat response).
+    """
     provider = (config.get("provider") or "none").strip()
     model = (config.get("model") or "").strip()
     if provider == "none" or not model:
@@ -275,11 +287,12 @@ def get_provider(config: dict) -> Optional[BaseProvider]:
     api_key = (config.get("api_key") or "").strip()
     base_url = (config.get("base_url") or "").strip() or DEFAULT_BASE_URLS.get(provider, "")
     temperature = float(config.get("temperature") or 0.3)
+    kwargs = {"timeout": timeout} if timeout else {}
 
     if provider in ("openai", "deepseek", "ollama", "custom"):
-        return OpenAICompatibleProvider(api_key, base_url, model, temperature)
+        return OpenAICompatibleProvider(api_key, base_url, model, temperature, **kwargs)
     if provider == "anthropic":
-        return AnthropicProvider(api_key, base_url, model, temperature)
+        return AnthropicProvider(api_key, base_url, model, temperature, **kwargs)
     if provider == "gemini":
-        return GeminiProvider(api_key, base_url, model, temperature)
+        return GeminiProvider(api_key, base_url, model, temperature, **kwargs)
     return None

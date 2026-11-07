@@ -8,6 +8,18 @@ class ParseResult(BaseModel):
     """Structured filters extracted from a chat message (by an LLM or fallback)."""
     meal: Optional[str] = Field(default=None, description="breakfast | lunch | dinner | snack, or null")
     cuisines: list[str] = Field(default_factory=list)
+    dish_intent: list[str] = Field(
+        default_factory=list,
+        description="Dish-level intent tags (e.g. soup noodles, wonton, ramen, sashimi).",
+    )
+    texture: list[str] = Field(
+        default_factory=list,
+        description="Texture/style tags (e.g. soup, wet, dry, grilled, spicy).",
+    )
+    vibe: list[str] = Field(
+        default_factory=list,
+        description="Vibe/occasion tags (e.g. comforting, light, quick, late-night).",
+    )
     price_level: Optional[int] = Field(default=None, description="1 ($), 2 ($$), 3 ($$$), or null")
     open_at: Optional[str] = Field(default=None, description="'HH:MM' the user plans to eat, or null")
     dietary: list[str] = Field(default_factory=list)
@@ -32,6 +44,13 @@ class ChatRequest(BaseModel):
         description=(
             "Opt-in: if no restaurant satisfies every hard filter, drop one filter at a time "
             "and disclose which filters were relaxed. Defaults to false (strict)."
+        ),
+    )
+    rerank: Optional[bool] = Field(
+        default=None,
+        description=(
+            "Override the constrained LLM re-rank for this request. None = server "
+            "default (LLM_RERANK_ENABLED). Demo mode is always deterministic."
         ),
     )
 
@@ -59,6 +78,26 @@ class ChatResponse(BaseModel):
         description="Soft preference fields that no restaurant matched (dietary, cuisines).",
     )
     relaxed: list[str] = Field(default_factory=list)
+    selection_mode: str = Field(
+        default="deterministic",
+        description=(
+            "How the final order was chosen: llm_rerank (validated LLM selection), "
+            "deterministic (no LLM selection attempted: no LLM configured, feature "
+            "disabled, or rerank=false), or fallback (LLM selection failed/rejected, "
+            "deterministic ranking used)."
+        ),
+    )
+    candidate_count: int = Field(
+        default=0,
+        description="Number of backend-generated candidates the selector considered.",
+    )
+    selection_note: str = Field(
+        default="",
+        description=(
+            "Diagnostic note when selection_mode is 'fallback' (e.g. timeout, "
+            "invalid output, provider error). Empty otherwise."
+        ),
+    )
     summary: str
     picks: list[dict]  # {restaurant, reason}
 

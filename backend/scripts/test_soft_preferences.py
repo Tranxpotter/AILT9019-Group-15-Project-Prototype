@@ -101,22 +101,43 @@ def main() -> int:
         }, [p["id"] for p in res.picks]
         print("OK  vegetarian cuisine normalized into dietary")
 
-        # 4) Cuisine fallback: no cheap noodle venue -> hard-only matches + disclosure.
+        # 4) Food-type intent outranks price: cheap noodle -> pricier noodle venue.
         res = chat_router.chat(ChatRequest(message="Cheap noodle lunch", limit=5))
-        assert res.status == "soft_fallback", res.status
-        assert res.soft_fallback is True, res.soft_fallback
-        assert res.unmet_soft == ["cuisines"], res.unmet_soft
-        assert {p["id"] for p in res.picks} == {
-            "sun-kee-curry-house",
-        }, [p["id"] for p in res.picks]
-        assert all(p["soft_mismatches"] for p in res.picks), [
-            p["soft_mismatches"] for p in res.picks
+        assert res.status == "relaxed", res.status
+        assert res.relaxed == ["price_level"], res.relaxed
+        assert res.soft_fallback is False, res.soft_fallback
+        assert res.unmet_soft == [], res.unmet_soft
+        assert [p["id"] for p in res.picks] == ["water-street-noodle-house"], [
+            p["id"] for p in res.picks
         ]
-        assert (
-            "No restaurant matches all your preferences (cuisine)"
-            in res.summary
-        ), res.summary
-        print("OK  cuisine fallback:", res.summary)
+        assert not res.picks[0]["soft_mismatches"], res.picks[0]["soft_mismatches"]
+        assert "relaxed the price filter" in res.summary.lower(), res.summary
+        print("OK  food-type over price:", res.summary)
+
+        # 4b) More food-type-over-price cases.
+        cases = [
+            ("Cheap sushi lunch", {"hana-sushi"}),
+            ("Cheap Thai lunch", {"pokfulam-thai-grill"}),
+            ("Cheap grilled lunch", {"pokfulam-thai-grill"}),
+            (
+                "Cheap healthy lunch",
+                {"green-bowl-salad-bar", "jade-garden-vegetarian"},
+            ),
+            ("Cheap noodle breakfast", {"water-street-noodle-house"}),
+        ]
+        for message, expected in cases:
+            res = chat_router.chat(ChatRequest(message=message, limit=5))
+            assert res.status == "relaxed", (message, res.status)
+            assert res.relaxed == ["price_level"], (message, res.relaxed)
+            assert {p["id"] for p in res.picks} == expected, (
+                message,
+                [p["id"] for p in res.picks],
+            )
+        # No food-type intent -> hard refusal is preserved (M1 behavior).
+        res = chat_router.chat(ChatRequest(message="Cheap vegan breakfast", limit=5))
+        assert res.status == "no_match", res.status
+        assert res.relaxed == [], res.relaxed
+        print("OK  food-type over price cases + hard refusal preserved")
 
         # 5) Dietary fallback: no cheap vegan snack -> Sweet Corner + disclosure.
         res = chat_router.chat(ChatRequest(message="Cheap vegan snack", limit=5))
@@ -143,8 +164,8 @@ def main() -> int:
         ]
         print("OK  cheap dessert -> Sweet Corner only")
 
-        # 7) LLM mode: deterministic fallback disclosure is enforced even if the
-        #    LLM summary omits it.
+        # 7) LLM mode: deterministic price-relaxation disclosure is enforced even
+        #    if the LLM summary omits it.
         original_parse = chat_router.parse_message
         original_explain = chat_router.explain_llm
         chat_router.parse_message = lambda config, message: (
@@ -160,17 +181,18 @@ def main() -> int:
         try:
             res = chat_router.chat(ChatRequest(message="Cheap noodle lunch", limit=5))
             assert res.mode == "llm", res.mode
-            assert res.soft_fallback is True, res.soft_fallback
-            assert (
-                "No restaurant matches all your preferences (cuisine)"
-                in res.summary
-            ), res.summary
-            print("OK  LLM fallback disclosure enforced:", res.summary)
+            assert res.relaxed == ["price_level"], res.relaxed
+            assert res.soft_fallback is False, res.soft_fallback
+            assert [p["id"] for p in res.picks] == ["water-street-noodle-house"], [
+                p["id"] for p in res.picks
+            ]
+            assert "relaxed the price filter" in res.summary.lower(), res.summary
+            print("OK  LLM price-relaxation disclosure enforced:", res.summary)
         finally:
             chat_router.parse_message = original_parse
             chat_router.explain_llm = original_explain
 
-        # 8) Explore endpoint uses the same strict-first/fallback behavior.
+        # 8) Explore endpoint: food-type intent outranks price.
         listed = restaurants_router.list_restaurants(
             meal="lunch",
             cuisine="Noodles",
@@ -181,11 +203,31 @@ def main() -> int:
             q=None,
             limit=20,
         )
-        assert listed["soft_fallback"] is True, listed
-        assert listed["unmet_soft"] == ["cuisines"], listed
+        assert listed["status"] == "relaxed", listed
+        assert listed["relaxed"] == ["price_level"], listed
+        assert listed["soft_fallback"] is False, listed
         assert {i["id"] for i in listed["items"]} == {
-            "sun-kee-curry-house",
+            "water-street-noodle-house",
         }, [i["id"] for i in listed["items"]]
+        assert not any(i["soft_mismatches"] for i in listed["items"]), listed["items"]
+        print("OK  /api/restaurants food-type over price")
+
+        # 8b) Explore endpoint still exposes hard-only fallback when no food-type
+        # match exists at any price (e.g. Korean cuisine).
+        listed = restaurants_router.list_restaurants(
+            meal="lunch",
+            cuisine="Korean",
+            price_level=None,
+            dietary=None,
+            allergens=None,
+            open_at=None,
+            q=None,
+            limit=20,
+        )
+        assert listed["status"] == "soft_fallback", listed
+        assert listed["soft_fallback"] is True, listed
+        assert listed["relaxed"] == [], listed
+        assert listed["unmet_soft"] == ["cuisines"], listed
         assert all(i["soft_mismatches"] for i in listed["items"]), [
             i["soft_mismatches"] for i in listed["items"]
         ]
